@@ -69,10 +69,11 @@
       <div class="field"><label for="pc">Postcode</label><input type="text" id="pc" autocomplete="postal-code" style="max-width:160px"></div>
       <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:.86rem;cursor:pointer"><input type="checkbox" id="mk" style="width:18px;height:18px;margin-top:2px;accent-color:var(--blue)"><span>Email me a monthly offer and a reminder when I am likely to need a restock. You can unsubscribe at any time.</span></label>
       <p class="tiny muted">We will email your quote to this address. We only use your details to deal with this enquiry.</p>
-      <div class="err" id="err" role="alert"></div>
-      <button class="btn block" id="go">Get my quote</button>
+      <div class="gobar"><div class="err" id="err" role="alert"></div>
+      <button class="btn block" id="go">Get my quote</button></div>
       <p class="small center" style="margin-top:12px">Already a customer? <a href="account.html">Log in</a> to re-order and track deliveries.</p>
     </aside>
+    <button class="btn floatbar hide" id="floatbar" type="button"></button>
   </div>
 </main>
 
@@ -184,7 +185,9 @@
     $('#count').textContent = c.n ? '(' + c.n + ' item' + (c.n === 1 ? '' : 's') + ')' : '';
     $('#mhint').classList.toggle('hide', !c.measure || $('#mchk').checked);
     $('#go').textContent = $('#mchk').checked ? 'Request my measure-up visit' : 'Get my quote';
+    var fb = $('#floatbar'); fb.classList.toggle('hide', !c.lines.length); fb.textContent = 'Review your quote: ' + c.n + ' item' + (c.n === 1 ? '' : 's') + ', ' + S.money(c.total) + ' inc VAT \u2192';
   }
+  $('#floatbar').addEventListener('click', function () { $('#go').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   $('#blines').addEventListener('click', function (e) {
     var line = e.target.closest('.bline'); if (!line) return; var id = line.dataset.id;
     if (e.target.dataset.rm) { delete st.basket[id]; }

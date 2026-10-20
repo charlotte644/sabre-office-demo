@@ -82,7 +82,7 @@
   function buttons() {
     var s = q.stage;
     if (s === 'Measure-up booked') return '<div class="actions"><button class="btn" id="ics">Add the visit to my calendar</button><a class="btn ghost" href="mailto:sales@sabreoffice.co.uk?subject=Visit%20' + encodeURIComponent(o) + '">Need to change the time?</a></div>';
-    if (s === 'Quote sent') return '<div class="actions"><button class="btn" id="accept">Accept this quote</button><button class="btn ghost red" id="decline">No thanks</button></div><p class="small muted" style="margin-top:12px">Accepting sets up your online account and takes you to payment. Nothing is charged until you pay.</p>';
+    if (s === 'Quote sent') return '<div class="actions stickyact"><button class="btn" id="accept">Accept this quote</button><button class="btn ghost red" id="decline">No thanks</button></div><p class="small muted" style="margin-top:12px">Accepting sets up your online account and takes you to payment. Nothing is charged until you pay.</p>';
     if (s === 'Accepted - awaiting payment') return '<div class="actions"><a class="btn" href="pay.html?o=' + encodeURIComponent(o) + '&t=' + encodeURIComponent(t) + '">Pay ' + S.money(q.total) + ' now</a><a class="btn ghost" href="account.html">Log in to my account</a></div>';
     if (s === 'Paid - order confirmed' || s === 'Out for delivery') return '<div class="actions"><a class="btn" href="account.html">Track my order</a></div>';
     if (s === 'Delivered') return '<div class="actions"><a class="btn" href="account.html">Re-order in one click</a></div>';
