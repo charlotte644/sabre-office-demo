@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My account | Sabre Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="site-header"></div>
+<main class="wrap" id="main" style="padding-top:24px"><div class="card center" style="padding:40px;max-width:520px;margin:30px auto"><span class="spinner dark"></span> One moment&hellip;</div></main>
+<div id="site-footer"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var S = window.Sabre, h = S.h, $ = S.$, main = $('#main');
+  var acct = null;
+
+  function renderHeader() { S.layout('account'); }
+
+  // ---- log in / reset -----------------------------------------------------------------------
+  function showLogin(msg) {
+    S.session.clear(); renderHeader();
+    main.innerHTML = '<div class="card authbox"><h2>Log in to your account</h2><p class="muted small">See your quotes and orders, pay online and re-order in a few clicks. Your login details were emailed to you when you accepted a quote or when Sabre Office set up your account.</p>' +
+      (msg ? '<div class="notice green small">' + h(msg) + '</div>' : '') +
+      '<div class="field"><label for="em">Email</label><input type="email" id="em" autocomplete="username"></div>' +
+      '<div class="field"><label for="pw">Password</label><input type="password" id="pw" autocomplete="current-password"></div>' +
+      '<div class="err" id="err" role="alert"></div><button class="btn block" id="in">Log in</button>' +
+      '<p class="small center" style="margin-top:14px"><a href="#" id="forgot">Forgotten your password?</a></p><hr style="border:0;border-top:1px solid var(--line);margin:18px 0">' +
+      '<p class="small center">New to Sabre Office online? <a href="index.html">Get a quote</a> and we will set up your account when you accept it.</p></div>';
+    var go = function () {
+      var b = $('#in'); $('#err').textContent = ''; S.busy(b, true, 'Logging in…');
+      S.api('login', $('#em').value.trim(), $('#pw').value).then(function (r) { S.session.set(r.session, r.customer); load(r.mustChange); })
+        .catch(function (e) { S.busy(b, false); $('#err').textContent = e.message; });
+    };
+    $('#in').addEventListener('click', go);
+    $('#pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+    $('#forgot').addEventListener('click', function (e) {
+      e.preventDefault();
+      var em = $('#em').value.trim();
+      if (!em) { $('#err').textContent = 'Type your email address above first, then press this link again.'; $('#em').focus(); return; }
+      S.api('requestReset', em).then(function () { $('#err').innerHTML = '<span style="color:var(--green)">If that email has an account, a reset link is on its way.</span>'; })
+        .catch(function (er) { $('#err').textContent = er.message; });
+    });
+  }
+
+  function showReset(token) {
+    renderHeader();
+    main.innerHTML = '<div class="card authbox"><h2>Choose a new password</h2><div class="field"><label for="p1">New password (at least 8 characters)</label><input type="password" id="p1" autocomplete="new-password"></div>' +
+      '<div class="field"><label for="p2">Type it again</label><input type="password" id="p2" autocomplete="new-password"></div><div class="err" id="err" role="alert"></div><button class="btn block" id="sv">Save new password</button></div>';
+    $('#sv').addEventListener('click', function () {
+      var b = this; $('#err').textContent = '';
+      if ($('#p1').value !== $('#p2').value) { $('#err').textContent = 'The two passwords do not match.'; return; }
+      S.busy(b, true, 'Saving…');
+      S.api('resetPassword', token, $('#p1').value).then(function () { history.replaceState(null, '', 'account.html'); showLogin('Password changed. Please log in.'); })
+        .catch(function (e) { S.busy(b, false); $('#err').textContent = e.message; });
+    });
+  }
+
+  function showMustChange() {
+    renderHeader();
+    main.innerHTML = '<div class="card authbox"><h2>Welcome. Please choose your own password</h2><p class="muted small">You logged in with a temporary password. Choose one that only you know.</p>' +
+      '<div class="field"><label for="op">Temporary password</label><input type="password" id="op" autocomplete="current-password"></div>' +
+      '<div class="field"><label for="p1">New password (at least 8 characters)</label><input type="password" id="p1" autocomplete="new-password"></div>' +
+      '<div class="err" id="err" role="alert"></div><button class="btn block" id="sv">Save and continue</button></div>';
+    $('#sv').addEventListener('click', function () {
+      var b = this; $('#err').textContent = ''; S.busy(b, true, 'Saving…');
+      S.api('changePassword', S.session.get().token, $('#op').value, $('#p1').value).then(function () { S.toast('Password saved.', 'ok'); load(false); })
+        .catch(function (e) { S.busy(b, false); $('#err').textContent = e.message; });
+    });
+  }
+
+  // ---- dashboard ----------------------------------------------------------------------------
+  function load(mustChange) {
+    var ses = S.session.get(); if (!ses) return showLogin();
+    S.api('getAccount', ses.token).then(function (a) {
+      acct = a; S.session.set(ses.token, a.customer);
+      if (mustChange || a.mustChange) { if (!mustChange) { /* still using the temporary password */ } return showMustChange(); }
+      draw();
+    }).catch(function (e) { showLogin(e.message); });
+  }
+
+  function progressFor(stage, measure) {
+    var step, labels;
+    if (measure) {
+      step = { 'Measure-up requested': 1, 'Measure-up booked': 2, 'Quote sent': 3, 'Declined - save the sale': 3, 'Closed - lost': 3, 'Accepted - awaiting payment': 4, 'Paid - order confirmed': 5, 'Out for delivery': 5, 'Delivered': 5 }[stage] || 1;
+      labels = ['Requested', 'Visit booked', 'Quote', 'Accepted', 'Paid'];
+    } else {
+      step = { 'Quote sent': 2, 'Declined - save the sale': 2, 'Closed - lost': 2, 'Accepted - awaiting payment': 3, 'Paid - order confirmed': 4, 'Out for delivery': 5, 'Delivered': 5 }[stage] || 1;
+      labels = ['Requested', 'Quote', 'Accepted', 'Paid', stage === 'Out for delivery' ? 'On its way' : 'Delivered'];
+    }
+    return '<div class="steps-bar">' + labels.map(function (l, i) { return '<div class="' + (i < step ? 'done' : '') + '">' + h(l) + '</div>'; }).join('') + '</div>';
+  }
+  function vWhen(iso, end) { var o = { timeZone: 'Europe/London' }; return new Date(iso).toLocaleDateString('en-GB', Object.assign({ weekday: 'long', day: 'numeric', month: 'long' }, o)) + ', ' + new Date(iso).toLocaleTimeString('en-GB', Object.assign({ hour: '2-digit', minute: '2-digit' }, o)) + (end ? ' to ' + new Date(end).toLocaleTimeString('en-GB', Object.assign({ hour: '2-digit', minute: '2-digit' }, o)) : ''); }
+
+  function draw() {
+    renderHeader();
+    var c = acct.customer, orders = acct.orders;
+    var open = orders.filter(function (o) { return ['Quote sent', 'Accepted - awaiting payment', 'Measure-up requested', 'New enquiry', 'Paid - order confirmed', 'Out for delivery'].indexOf(o.stage) !== -1; }).length;
+    var due = orders.filter(function (o) { return o.stage === 'Accepted - awaiting payment'; });
+    var spent = orders.filter(function (o) { return ['Paid - order confirmed', 'Out for delivery', 'Delivered'].indexOf(o.stage) !== -1; }).reduce(function (s, o) { return s + o.total; }, 0);
+    var rows = orders.map(function (o) {
+      return '<tr><td><strong>' + h(o.orderId) + '</strong></td><td>' + S.date(o.created) + '</td><td>' + S.stagePill(o.stage) + '</td><td class="num">' + (o.lines ? o.lines + (o.lines === 1 ? ' line' : ' lines') : '-') + '</td><td class="num">' + (o.total ? S.money(o.total) : '-') + '</td>' +
+        '<td class="num"><button class="btn small ghost" data-view="' + h(o.orderId) + '">View</button> ' +
+        (o.stage === 'Accepted - awaiting payment' ? '<a class="btn small" href="pay.html?o=' + encodeURIComponent(o.orderId) + '&t=' + encodeURIComponent(o.token) + '">Pay now</a> ' : '') +
+        (o.lines ? '<button class="btn small ghost" data-re="' + h(o.orderId) + '">Re-order</button>' : '') + '</td></tr>';
+    }).join('');
+    main.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px"><div><h1 style="margin:0">Hello, ' + h((c.name || '').split(' ')[0]) + '</h1><div class="muted small">' + h(c.company ? c.company + ' · ' : '') + h(c.email) + '</div></div>' +
+      '<div class="actions" style="margin:0"><a class="btn" href="index.html">Place a new order</a><button class="btn ghost" id="out">Log out</button></div></div>' +
+      (due.length ? '<div class="notice amber" style="margin-top:16px"><strong>' + due.length + ' order' + (due.length === 1 ? ' is' : 's are') + ' waiting for payment.</strong> Use the Pay now button below.</div>' : '') +
+      '<div class="tiles"><div class="tile"><div class="v">' + orders.length + '</div><div class="l">Quotes and orders</div></div><div class="tile"><div class="v">' + open + '</div><div class="l">In progress</div></div><div class="tile"><div class="v">' + S.money(spent) + '</div><div class="l">Paid to date (inc VAT)</div></div></div>' +
+      '<div class="card"><h2>Your orders</h2>' + (orders.length ? '<div style="overflow-x:auto"><table class="t"><thead><tr><th>Reference</th><th>Date</th><th>Status</th><th class="num">Items</th><th class="num">Total</th><th class="num"></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : '<p class="muted">You have no orders yet. <a href="index.html">Get a quote</a> to get started.</p>') + '</div>' +
+      '<div class="card" style="margin-top:20px"><h2>Your details</h2><div class="row2"><div><div class="tiny muted">NAME</div>' + h(c.name) + '</div><div><div class="tiny muted">PHONE</div>' + h(c.phone || '-') + '</div></div>' +
+      '<div class="row2" style="margin-top:10px"><div><div class="tiny muted">DELIVERY ADDRESS</div>' + h([c.address, c.postcode].filter(Boolean).join(', ') || '-') + '</div><div><div class="tiny muted">ACCOUNT TYPE</div>' + h(c.type) + '</div></div></div>';
+    $('#out').addEventListener('click', function () { S.session.clear(); showLogin('You have been logged out.'); });
+    main.onclick = onClick;
+  }
+
+  function onClick(e) {
+    var v = e.target.closest('[data-view]'), r = e.target.closest('[data-re]');
+    if (v) view(v.dataset.view);
+    if (r) {
+      var ses = S.session.get(); S.busy(r, true, 'Loading…');
+      S.api('reorderItems', ses.token, r.dataset.re).then(function (items) {
+        var b = {}; items.forEach(function (i) { b[i.id] = i.qty; });
+        S.store.set('sabre_basket_v1', b); location.href = 'index.html';
+      }).catch(function (er) { S.busy(r, false); S.toast(er.message, 'err'); });
+    }
+  }
+
+  function view(orderId) {
+    var o = acct.orders.filter(function (x) { return x.orderId === orderId; })[0]; if (!o) return;
+    var m = S.modal('<div class="center"><span class="spinner dark"></span></div>');
+    S.api('getQuote', o.orderId, o.token).then(function (q) {
+      m.firstChild.innerHTML = '<h2>' + h(q.orderId) + ' ' + S.stagePill(q.stage) + '</h2>' + progressFor(q.stage, q.measure) +
+        (q.visit && (q.visit.status === 'Confirmed' || q.visit.status === 'Completed') ? '<div class="notice green small"><strong>Measure-up visit:</strong> ' + h(vWhen(q.visit.start, q.visit.end)) + ' at ' + h(q.siteAddress) + '</div>' : (q.visit && q.visit.status === 'Requested' ? '<div class="notice amber small"><strong>Visit requested:</strong> waiting for Steve to confirm one of your times.</div>' : '')) +
+        (q.lines.length ? '<table class="t"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Total</th></tr></thead><tbody>' + q.lines.map(function (l) { return '<tr><td>' + h(l.name) + '</td><td class="num">' + l.qty + '</td><td class="num">' + S.money(l.line) + '</td></tr>'; }).join('') + '</tbody></table>' +
+          '<div class="totals"><div><span>Subtotal (ex VAT)</span><span>' + S.money(q.subtotal) + '</span></div><div><span>VAT</span><span>' + S.money(q.vat) + '</span></div><div class="grand"><span>Total</span><span>' + S.money(q.total) + '</span></div></div>' : '<p class="muted">Steve will add the products after the measure-up visit.</p>') +
+        (q.payRef ? '<p class="small muted">Paid ' + S.date(q.paidAt) + ' · reference ' + h(q.payRef) + '</p>' : '') +
+        '<div class="actions"><a class="btn" href="quote.html?o=' + encodeURIComponent(o.orderId) + '&t=' + encodeURIComponent(o.token) + '">Open full quote</a><button class="btn ghost" id="cl">Close</button></div>';
+      $('#cl', m).addEventListener('click', m.close);
+    }).catch(function (e) { m.firstChild.innerHTML = '<p class="err">' + h(e.message) + '</p>'; });
+  }
+
+  var reset = S.qs('reset');
+  if (reset) showReset(reset); else if (S.session.get()) load(false); else showLogin();
+})();
+</script>
+</body>
+</html>

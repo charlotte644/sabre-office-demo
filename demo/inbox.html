@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Preview inbox: every email the system sends</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:Poppins,Arial,sans-serif;background:#e9edf2;color:#212529}
+  header{background:#14202E;color:#fff;padding:10px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:1rem;margin:0;font-weight:600} header .sub{opacity:.8;font-size:.82rem;flex:1;min-width:200px}
+  .f button{background:transparent;border:1px solid #6b7c8f;color:#fff;border-radius:16px;padding:4px 12px;cursor:pointer;margin-right:6px;font:inherit;font-size:.82rem}
+  .f button.on{background:#1C64AD;border-color:#1C64AD}
+  main{display:flex;height:calc(100vh - 52px)} ul{width:390px;max-width:45vw;overflow:auto;margin:0;padding:0;list-style:none;background:#fff;border-right:1px solid #ccd}
+  li{padding:10px 14px;border-bottom:1px solid #e3e7ec;cursor:pointer;font-size:.82rem} li:hover,li.on{background:#e6f0fa}
+  li .s{font-weight:600;display:block;margin-bottom:2px} li .m{color:#667;font-size:.74rem}
+  .tag{display:inline-block;border-radius:9px;padding:0 8px;font-size:.68rem;font-weight:600;margin-right:6px;background:#e8f1fa;color:#154f8a} .tag.steve{background:#fdecee;color:#b92b3a}
+  .view{flex:1;display:flex;flex-direction:column;min-width:0} .view .top{padding:10px 16px;background:#fff;border-bottom:1px solid #ccd;font-size:.82rem}
+  iframe{flex:1;border:0;background:#fff;width:100%} .empty{padding:40px;color:#667;text-align:center}
+  .att a{display:inline-block;margin-left:8px;color:#1C64AD}
+</style></head><body>
+<header><h1>Preview inbox</h1><span class="sub">Every email the system would send, to clients and to Steve. In the real system these arrive in real inboxes.</span>
+  <span class="f"><button data-f="" class="on">All</button><button data-f="client">To clients</button><button data-f="steve">To Steve</button></span></header>
+<main><ul id="l"></ul><div class="view"><div class="top" id="top">Choose an email on the left.</div><iframe id="f" title="Email"></iframe></div></main>
+<script>
+var KEY = 'gas_mock_db_v1', filter = '', selTs = '';
+function load() { try { return (JSON.parse(localStorage.getItem(KEY)) || {}).mail || []; } catch (e) { return []; } }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function isSteve(m) { return /\[CRM\]/.test(m.subject); }
+function draw() {
+  var all = load().slice().reverse(), l = document.getElementById('l'), last = l.dataset.n;
+  var list = all.filter(function (m) { return !filter || (filter === 'steve') === isSteve(m); });
+  if (last === String(all.length) + filter) return;
+  l.dataset.n = String(all.length) + filter;
+  l.innerHTML = list.length ? '' : '<div class="empty">No emails yet. Do something on the order page or the dashboard and the emails appear here.</div>';
+  list.forEach(function (m) {
+    var li = document.createElement('li'); if (m.ts === selTs) li.className = 'on';
+    li.innerHTML = '<span class="s">' + esc(m.subject) + '</span><span class="m"><span class="tag ' + (isSteve(m) ? 'steve">To Steve' : '">To client') + '</span>' + esc(m.to) + ' · ' + new Date(m.ts).toLocaleTimeString('en-GB') +
+      ((m.attachments && m.attachments.length) ? ' · &#128206; ' + esc(m.attachments.map(function (a) { return a.name; }).join(', ')) : '') + '</span>';
+    li.onclick = function () { show(m); [].forEach.call(l.children, function (x) { x.className = ''; }); li.className = 'on'; };
+    l.appendChild(li);
+  });
+}
+function show(m) {
+  selTs = m.ts;
+  var att = (m.attachments || []).map(function (a) { return '<a href="data:' + a.type + ';charset=utf-8,' + encodeURIComponent(a.data) + '" download="' + esc(a.name) + '">Download ' + esc(a.name) + '</a>'; }).join('');
+  document.getElementById('top').innerHTML = '<strong>' + esc(m.subject) + '</strong><br><span style="color:#667">From ' + esc(m.name || 'Sabre Office') + ' · To ' + esc(m.to) + ' · Reply-to ' + esc(m.replyTo || '') + '</span><span class="att">' + att + '</span>';
+  document.getElementById('f').srcdoc = m.html.replace(/<html>/i, '<html><head><base target="_blank"></head>');
+}
+document.querySelector('.f').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; filter = b.dataset.f; [].forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); }); document.getElementById('l').dataset.n = ''; draw(); });
+draw(); setInterval(draw, 1500);
+// ?show=text in the subject opens that email straight away
+(function () { var s = new URLSearchParams(location.search).get('show'); if (!s) return; var m = load().slice().reverse().filter(function (x) { return x.subject.indexOf(s) !== -1; })[0]; if (m) { show(m); var items = document.getElementById('l').children; for (var i = 0; i < items.length; i++) { if (items[i].textContent.indexOf(m.subject) !== -1) { items[i].className = 'on'; break; } } } })();
+</script></body></html>

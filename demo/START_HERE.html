@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sabre Office demo: preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<style>
+  .hero2{background:linear-gradient(120deg,#1C64AD,#2a7bc9);color:#fff;padding:36px 0} .hero2 h1{font-size:2rem;margin:0 0 .3em} .hero2 p{max-width:680px;margin:0;opacity:.95;font-size:1.05rem}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:26px 0}
+  .big{display:block;text-decoration:none;color:inherit} .big h2{margin-bottom:.3em} .big p{margin:0 0 14px;color:#6c757d;font-size:.92rem}
+  ol.try{line-height:1.9;padding-left:20px}
+</style></head><body>
+<section class="hero2"><div class="wrap"><h1>Sabre Office demo: preview</h1>
+<p>This is the real client experience and Steve's dashboard, running right here in your browser. Nothing is sent and nothing is charged: every email lands in the preview inbox instead of a real inbox.</p></div></section>
+<main class="wrap">
+  <div class="grid3">
+    <div class="card big"><h2>1. What the client sees</h2><p>The order page, the instant quote, accepting, paying, booking a visit, and the client login.</p><a class="btn" href="index.html">Open the order page</a></div>
+    <div class="card big"><h2>2. What Steve sees</h2><p>The CRM dashboard: pipeline, tasks, calendar bookings, automations and prices.</p><a class="btn red" href="admin.html">Open Steve's dashboard</a></div>
+    <div class="card big"><h2>3. The emails</h2><p>Every email, as the client or Steve would get it. Keep this open in a second tab.</p><a class="btn ghost" href="inbox.html" target="sabre_inbox">Open the preview inbox</a></div>
+  </div>
+  <div class="card"><h2>A good way to try it (5 minutes)</h2>
+    <ol class="try">
+      <li>Press <strong>Add sample orders</strong> in the bar along the bottom, so Steve's dashboard has something in it.</li>
+      <li>Open the <strong>order page</strong>, add a few products, enter any name and any email address, and press <strong>Get my quote</strong>. Look at the <strong>inbox</strong>: the quote email is there.</li>
+      <li>Press <strong>Accept</strong> on the quote, then pay (it is a demo payment). Watch the emails arrive: login and payment link, then the confirmation.</li>
+      <li>Go back to the order page and tick <strong>I'd like Steve to visit and measure up first</strong>. Pick times. Then open <strong>Steve's dashboard</strong>, find it under <strong>Tasks</strong>, and approve a time. Only then does the client get their confirmation.</li>
+      <li>In the dashboard, open <strong>Automations</strong> and press <strong>Send visit reminders now</strong> or <strong>Pretend 3 days have passed</strong> to see the automatic emails.</li>
+    </ol>
+    <p class="small muted">The bar along the bottom of every page switches between the client and Steve. <strong>Start again</strong> wipes the preview clean. Prices are the real sabreoffice.co.uk prices from the day this preview was made.</p>
+  </div>
+</main>
+<script src="config.js"></script><script src="app.js"></script>
+</body></html>

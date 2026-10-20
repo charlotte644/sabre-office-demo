@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pay for your order | Sabre Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="site-header"></div>
+<main class="wrap"><div class="doc" id="doc"><div class="card center" style="padding:40px"><span class="spinner dark"></span> Loading your order&hellip;</div></div></main>
+<div id="site-footer"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var S = window.Sabre, h = S.h, $ = S.$;
+  S.layout('order');
+  var o = S.qs('o'), t = S.qs('t'), q = null;
+
+  function summary() {
+    return '<table class="t"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Total</th></tr></thead><tbody>' +
+      q.lines.map(function (l) { return '<tr><td>' + h(l.name) + '</td><td class="num">' + l.qty + '</td><td class="num">' + S.money(l.line) + '</td></tr>'; }).join('') + '</tbody></table>' +
+      '<div class="totals"><div><span>Subtotal (ex VAT)</span><span>' + S.money(q.subtotal) + '</span></div><div><span>VAT (' + q.vatPct + '%)</span><span>' + S.money(q.vat) + '</span></div><div class="grand"><span>To pay</span><span>' + S.money(q.total) + '</span></div></div>';
+  }
+
+  function draw() {
+    var s = q.stage;
+    if (s === 'Paid - order confirmed') {
+      $('#doc').innerHTML = '<div class="card center" style="padding:36px"><h2>Payment received. Thank you!</h2><p>Order <strong>' + h(q.orderId) + '</strong> is confirmed. We have emailed your confirmation to <strong>' + h(q.customer.email) + '</strong>.</p>' +
+        '<p class="muted small">Payment reference ' + h(q.payRef) + (q.paidAt ? ' · ' + S.date(q.paidAt) : '') + '</p>' +
+        '<div class="actions" style="justify-content:center"><a class="btn" href="account.html">Log in to track my order</a><a class="btn ghost" href="index.html">Place another order</a></div></div>';
+      return;
+    }
+    if (s !== 'Accepted - awaiting payment') {
+      $('#doc').innerHTML = '<div class="card center" style="padding:36px"><h2>This order is not ready for payment</h2><p class="muted">Please accept your quote first.</p><a class="btn" href="quote.html?o=' + encodeURIComponent(o) + '&t=' + encodeURIComponent(t) + '">Go to my quote</a></div>';
+      return;
+    }
+    $('#doc').innerHTML = '<div class="row2" style="align-items:start;gap:20px"><div class="card"><h2>Order ' + h(q.orderId) + '</h2><p class="muted small">For ' + h(q.customer.name) + (q.customer.company ? ', ' + h(q.customer.company) : '') + '</p>' + summary() + '</div>' +
+      '<div class="card"><h2>Payment</h2><div class="notice amber small"><strong>Demonstration payment.</strong> In the live system this step hands over to your card provider or to Sage, so card details are handled by them. Here, nothing is charged and no card details are asked for.</div>' +
+      '<div class="bigtotal" style="margin:10px 0">' + S.money(q.total) + '</div><div class="small muted" style="margin-bottom:14px">Includes VAT of ' + S.money(q.vat) + '</div>' +
+      '<div class="err" id="err" role="alert"></div><button class="btn block" id="pay">Pay ' + S.money(q.total) + ' (demo)</button>' +
+      '<p class="tiny muted center" style="margin-top:12px">As soon as you pay, a confirmation email is sent to ' + h(q.customer.email) + '.</p></div></div>';
+    $('#pay').addEventListener('click', function () {
+      var b = this; S.busy(b, true, 'Taking payment…');
+      S.api('payOrder', o, t).then(function () { return load(); }).catch(function (e) { S.busy(b, false); $('#err').textContent = e.message; });
+    });
+  }
+
+  function load() {
+    return S.api('getQuote', o, t).then(function (r) { q = r; draw(); }).catch(function (e) {
+      $('#doc').innerHTML = '<div class="card center" style="padding:40px"><h2>We could not open that order</h2><p class="muted">' + h(e.message) + '</p><a class="btn" href="index.html">Start a new quote</a></div>';
+    });
+  }
+  if (!o || !t) $('#doc').innerHTML = '<div class="card center" style="padding:40px"><h2>This payment link looks incomplete</h2><p class="muted">Please use the link in your email.</p></div>';
+  else load();
+})();
+</script>
+</body>
+</html>

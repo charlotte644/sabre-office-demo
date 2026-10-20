@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Sabre Office CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="admin-head"><div class="wrap">
+  <img src="https://www.sabreoffice.co.uk/admin/images/sitelogo/22241_SiteLogo.jpg" alt="Sabre Office">
+  <h1>CRM &amp; order dashboard <span class="pill" style="background:#DC3545;color:#fff;margin-left:6px">DEMO</span></h1>
+  <nav class="tabs" id="tabs">
+    <button data-t="pipeline" class="on">Pipeline</button><button data-t="tasks">Tasks <span class="pill red" id="tbadge" style="display:none;margin-left:2px"></span></button><button data-t="automations">Automations</button><button data-t="promotions">Monthly offers</button><button data-t="restock">Restock</button><button data-t="customers">Clients</button><button data-t="prices">Prices</button><button data-t="activity">Activity &amp; emails</button><button data-t="settings">Settings &amp; demo tools</button>
+  </nav>
+</div></header>
+<main class="wrap" id="view" style="padding-top:20px"><div class="center muted" style="padding:50px"><span class="spinner dark"></span> Loading&hellip;</div></main>
+<div id="drawer-mount"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var S = window.Sabre, h = S.h, $ = S.$, view = $('#view');
+  var key = S.qs('key') || S.store.get('sabre_admin_key') || '';
+  if (S.qs('key')) { S.store.set('sabre_admin_key', key); history.replaceState(null, '', location.pathname + location.hash); }
+  var tab = 'pipeline', board = null, cur = null, edit = null, catalogue = null, timer = null;
+
+  function A() { return S.api.apply(null, [arguments[0], key].concat(Array.prototype.slice.call(arguments, 1))); }
+  function fail(e) { S.toast(e.message, 'err'); }
+  function stageClass(s) { return { 'Measure-up requested': 'amber', 'Accepted - awaiting payment': 'amber', 'Paid - order confirmed': 'green', 'Declined - save the sale': 'red', 'Closed - lost': 'grey' }[s] || ''; }
+  function vDay(iso) { return new Date(iso).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short' }); }
+  function vTime(iso) { return new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }); }
+  function vLocalInput(iso) { var d = new Date(iso), p = {}; new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d).forEach(function (x) { p[x.type] = x.value; }); return p.year + '-' + p.month + '-' + p.day + 'T' + (p.hour === '24' ? '00' : p.hour) + ':' + p.minute; }
+  function fmtMins(m) { m = Math.round(m || 0); if (m < 60) return m + ' min'; var hh = Math.floor(m / 60), mm = m % 60; return hh + ' h' + (mm ? ' ' + mm + ' min' : ''); }
+  function ago(iso) { var d = (Date.now() - new Date(iso).getTime()) / 60000; if (d < 1) return 'just now'; if (d < 60) return Math.floor(d) + ' min ago'; if (d < 1440) return Math.floor(d / 60) + ' h ago'; return Math.floor(d / 1440) + ' d ago'; }
+
+  // ---- tabs ------------------------------------------------------------------------------------
+  $('#tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) go(b.dataset.t); });
+  function go(t) {
+    tab = t; clearInterval(timer);
+    S.$$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); });
+    view.innerHTML = '<div class="center muted" style="padding:50px"><span class="spinner dark"></span> Loading&hellip;</div>';
+    ({ pipeline: showPipeline, tasks: showTasks, automations: showAutomations, promotions: showPromotions, restock: showRestock, customers: showCustomers, prices: showPrices, activity: showActivity, settings: showSettings })[t]();
+  }
+
+  // ---- pipeline --------------------------------------------------------------------------------
+  function showPipeline() {
+    A('adminBoard').then(function (b) { board = b; setBadge(); drawPipeline(); timer = setInterval(refreshBoard, 20000); }).catch(function (e) {
+      view.innerHTML = '<div class="card center" style="max-width:560px;margin:40px auto;padding:30px"><h2>Cannot open the dashboard</h2><p class="muted">' + h(e.message) + '</p><p class="small">Use the dashboard link from the set-up email. It contains a private key.</p></div>';
+    });
+  }
+  function refreshBoard() { if ($('#drawer')) return; A('adminBoard').then(function (b) { board = b; setBadge(); drawPipeline(true); }).catch(function () {}); }
+
+  function drawPipeline() {
+    var k = board.kpis, f = ($('#flt') || {}).value || '';
+    var au = board.automation || { clientEmails: 0, minutesSaved: 0 };
+    var tiles = [['Quotes out', S.money(k.openQuotes), k.openQuotesCount + ' waiting for an answer'], ['Accepted, awaiting payment', S.money(k.awaitingPay), 'chased automatically'],
+      ['Paid', S.money(k.paid), k.paidCount + ' order' + (k.paidCount === 1 ? '' : 's') + ' to dispatch'], ['To deliver', String(k.toDeliver || 0), 'paid and not yet delivered'], ['Calls to make', S.money(k.savable), k.savableCount + ' declined quote' + (k.savableCount === 1 ? '' : 's') + ' to try to save'],
+      ['Visits to approve', String(k.measureCount), 'times waiting for your OK'], ['Visits booked', String(k.visitsBooked || 0), 'in your calendar'], ['Win rate', k.winRate === null ? '-' : k.winRate + '%', 'of decided quotes'],
+      ['Emails sent for you', String(au.clientEmails), '≈ ' + fmtMins(au.minutesSaved) + ' of your time']];
+    var html = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Pipeline</h2><button class="btn small red" id="nq">+ New quote for a client</button><input type="search" id="flt" placeholder="Filter by name, company or reference" style="max-width:320px" value="' + h(f) + '"><button class="btn small ghost" id="rf">Refresh</button>' +
+      '<span class="small muted">Alerts go to <strong>' + h(board.alertEmail) + '</strong> · updates itself every 20 seconds</span></div>' +
+      (board.tasks && board.tasks.length ? '<div class="notice red" style="margin:12px 0 0"><strong>' + board.tasks.length + ' thing' + (board.tasks.length === 1 ? '' : 's') + ' for you to do.</strong> ' + (board.tasks.filter(function (t) { return t.type === 'call'; }).length ? board.tasks.filter(function (t) { return t.type === 'call'; }).length + ' call' + (board.tasks.filter(function (t) { return t.type === 'call'; }).length === 1 ? '' : 's') + ' to try to save a sale. ' : '') + '<a href="#" id="gotasks">See your tasks</a></div>' : '') +
+      '<div class="kpis">' + tiles.map(function (t) { return '<div class="tile"><div class="l">' + h(t[0]) + '</div><div class="v">' + h(t[1]) + '</div><div class="tiny muted">' + h(t[2]) + '</div></div>'; }).join('') + '</div><div class="board">';
+    board.stages.forEach(function (st) {
+      var list = board.orders.filter(function (o) { return o.stage === st && (!f || (o.name + ' ' + o.company + ' ' + o.orderId + ' ' + o.email).toLowerCase().indexOf(f.toLowerCase()) !== -1); });
+      var sum = list.reduce(function (s, o) { return s + o.total; }, 0);
+      html += '<div class="col"><h3><span>' + h(S.stageLabel(st)) + '</span><span>' + list.length + '</span></h3><div class="sum">' + (sum ? S.money(sum) + ' inc VAT' : '&nbsp;') + '</div>';
+      list.forEach(function (o) {
+        html += '<div class="ocard" data-o="' + h(o.orderId) + '"><span class="v">' + (o.total ? S.money(o.total) : '') + '</span><span class="n">' + h(o.company || o.name) + '</span><div class="meta">' + h(o.orderId) + ' · ' + h(o.name) + '<br>' + (o.callDue ? '<span class="pill red">Call due</span> ' : '') + (o.source === 'Auto restock' ? '<span class="pill">Auto restock</span> ' : '') + (o.visitStatus === 'Confirmed' ? '<span class="pill green">' + h(vDay(o.visitStart) + ' ' + vTime(o.visitStart)) + '</span> ' : (o.measure && o.stage === 'Measure-up requested' ? '<span class="pill amber">Approve a time</span> ' : '')) + ago(o.updated || o.created) + '</div></div>';
+      });
+      if (!list.length) html += '<div class="tiny muted" style="padding:6px 4px">Nothing here</div>';
+      html += '</div>';
+    });
+    html += '</div>' + (board.orders.length ? '' : '<div class="notice" style="margin-top:6px">No orders yet. Open the <a href="index.html" target="_blank">order page</a> in another tab, build a quote with your own email address, and watch it appear here.</div>');
+    view.innerHTML = html;
+    $('#flt').addEventListener('input', function () { var pos = this.selectionStart; drawPipeline(); var el = $('#flt'); el.focus(); el.setSelectionRange(pos, pos); });
+    $('#rf').addEventListener('click', showPipeline);
+    $('#nq').addEventListener('click', function () { openNewQuote(); });
+    var gt = $('#gotasks'); if (gt) gt.addEventListener('click', function (e) { e.preventDefault(); go('tasks'); });
+    S.$$('.ocard').forEach(function (c) { c.addEventListener('click', function () { openOrder(c.dataset.o); }); });
+  }
+
+  // ---- order drawer ------------------------------------------------------------------------------
+  function ensureCatalogue() { return catalogue ? Promise.resolve(catalogue) : A('adminCatalogue').then(function (c) { catalogue = c; return c; }); }
+
+  function openOrder(id) { openOrderThen(id); }
+  function openOrderThen(id, after) {
+    history.replaceState(null, '', location.pathname + '#order=' + id);
+    A('adminOrder', id).then(function (o) { cur = o; edit = o.lines.map(function (l) { return { id: l.id, code: l.code, name: l.name, qty: l.qty, unit: l.unit }; }); return ensureCatalogue(); }).then(function () { drawDrawer(); if (after) after(); }).catch(fail);
+  }
+  function closeDrawer() { var m = $('#drawer-mount'); m.innerHTML = ''; history.replaceState(null, '', location.pathname); cur = null; }
+
+  function editable() { return ['Measure-up requested', 'Measure-up booked', 'New enquiry', 'Quote sent'].indexOf(cur.stage) !== -1; }
+
+  function editTotals() {
+    var sub = 0; edit.forEach(function (l) { sub += l.unit * l.qty; }); sub = Math.round(sub * 100) / 100;
+    var vat = Math.round(sub * cur.vatPct) / 100; return { sub: sub, vat: vat, total: Math.round((sub + vat) * 100) / 100 };
+  }
+
+  function drawDrawer() {
+    var o = cur, c = o.customerFull, t = editable() ? editTotals() : { sub: o.subtotal, vat: o.vat, total: o.total };
+    var lines = editable() ? edit : o.lines;
+    var ln = '<table class="t"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Total</th>' + (editable() ? '<th></th>' : '') + '</tr></thead><tbody>' +
+      lines.map(function (l, i) {
+        return '<tr><td>' + h(l.name) + '<div class="tiny muted">Code ' + h(l.code) + ' · ' + S.money(l.unit) + ' each</div></td><td class="num">' + (editable() ? '<input type="number" min="1" max="9999" value="' + l.qty + '" data-i="' + i + '" style="width:70px;text-align:center">' : l.qty) + '</td>' +
+          '<td class="num">' + S.money(l.unit * l.qty) + '</td>' + (editable() ? '<td class="num"><button class="btn small ghost red" data-rm="' + i + '">&times;</button></td>' : '') + '</tr>';
+      }).join('') + (lines.length ? '' : '<tr><td colspan="4" class="muted">No products yet.</td></tr>') + '</tbody></table>';
+    var add = editable() ? '<div style="display:flex;gap:6px;margin:10px 0"><input list="plist" id="addp" placeholder="Add a product: type a code or name" style="flex:1"><input type="number" id="addq" min="1" value="1" style="width:70px"><button class="btn small" id="addb">Add</button></div><datalist id="plist">' +
+      catalogue.products.filter(function (p) { return p.active; }).map(function (p) { return '<option value="' + h(p.code) + ' | ' + h(p.name.slice(0, 70)) + '">'; }).join('') + '</datalist>' : '';
+    var act = '';
+    if (o.stage === 'Measure-up requested') {
+      var slotsHtml = (o.visit.slots || []).map(function (sl, i) { return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)"><span><strong>' + h(vDay(sl.start)) + '</strong> ' + h(vTime(sl.start)) + ' to ' + h(vTime(sl.end)) + '</span><button class="btn small" data-appr="' + i + '">Approve this time</button></div>'; }).join('');
+      act += '<div class="notice amber" style="flex-basis:100%"><strong>The client has asked for a visit. Nothing has been confirmed to them yet.</strong> These times are in your calendar as orange PENDING entries. Approve one and the client is emailed straight away.</div>' +
+        '<div style="flex-basis:100%">' + slotsHtml + '</div>' +
+        '<div class="field" style="flex-basis:100%;margin-top:10px"><label for="bk">None suit? Book a different time</label><div style="display:flex;gap:8px"><input type="datetime-local" id="bk" step="900"><button class="btn small ghost" id="bookb">Book it and tell the client</button></div></div>' +
+        '<div class="field" style="flex-basis:100%"><label for="qnote">Or skip the visit and quote now. Message to include (optional)</label><textarea id="qnote" placeholder="e.g. I have worked from the details you gave me, so the quote is an estimate."></textarea></div><button class="btn ghost red" id="sendq">Skip the visit: send quote</button> ';
+    }
+    if (o.stage === 'Measure-up booked') {
+      act += '<div class="notice green" style="flex-basis:100%"><strong>Visit booked: ' + h(vDay(o.visit.start)) + ' ' + h(vTime(o.visit.start)) + ' to ' + h(vTime(o.visit.end)) + '.</strong> It is in your calendar, the client has their confirmation, and a reminder goes out automatically 24 hours before.</div>' +
+        '<div class="field" style="flex-basis:100%"><label for="bk">Need to move it?</label><div style="display:flex;gap:8px"><input type="datetime-local" id="bk" step="900" value="' + h(vLocalInput(o.visit.start)) + '"><button class="btn small ghost" id="bookb">Move it and tell the client</button></div></div>' +
+        '<div class="field" style="flex-basis:100%;margin-top:6px"><label for="qnote">Back from the visit? Message to include with the quote (optional)</label><textarea id="qnote" placeholder="e.g. Thanks for having me round today. I have allowed for the wall-mounted shelving we discussed."></textarea></div><button class="btn red" id="sendq">Visit done: send quote to client</button> <button class="btn ghost" id="remind">Send visit reminder now</button> ';
+    }
+    if (o.stage === 'Quote sent') act += '<button class="btn" id="sendq">Re-send updated quote</button> <button class="btn ghost" id="remind">Send reminder now</button> <button class="btn ghost red" id="lost">Close as lost</button>';
+    if (o.stage === 'Accepted - awaiting payment') act += '<button class="btn ghost" id="remind">Send payment reminder</button> <button class="btn" id="paid">Mark as paid</button>';
+    if (o.stage === 'Paid - order confirmed') act += '<div class="notice green small" style="flex-basis:100%"><strong>Paid.</strong> The client has already had their confirmation and receipt by email. Next: delivery. Tapping the button below emails them automatically.</div>' +
+      '<div class="field" style="flex-basis:100%"><label for="dnote">Delivery details for the client (optional)</label><textarea id="dnote" placeholder="e.g. Between 10am and 12pm today. Driver: Dave, 07700 900321."></textarea></div><button class="btn" id="disp">Out for delivery</button> <button class="btn ghost" id="deliv">Mark as delivered</button>';
+    if (o.stage === 'Out for delivery') act += '<div class="notice small" style="flex-basis:100%">Sent to the client: &ldquo;Your order is on its way&rdquo;' + (o.deliveryNote ? ' with: ' + h(o.deliveryNote) : '') + '</div><button class="btn" id="deliv">Mark as delivered</button>';
+    if (o.stage === 'Delivered') act += '<div class="notice green small" style="flex-basis:100%"><strong>Delivered' + (o.deliveredAt ? ' ' + S.date(o.deliveredAt) : '') + '.</strong> The client has been thanked. A &ldquo;how did we do / re-order in one click&rdquo; email goes out automatically 3 days after delivery.</div>';
+    if (o.stage === 'Declined - save the sale') {
+      var due = o.flags && o.flags.call_due;
+      act += '<div class="notice red" style="flex-basis:100%"><strong>' + (due ? 'Your task: call ' + h(c.name) + ' to try to save the sale.' : 'Declined.') + '</strong><br>Reason given: ' + h(o.declineReason || 'none given') + '<br>Quote value: <strong>' + S.money(o.total) + '</strong> inc VAT' +
+        '<br><span class="small">Nothing was emailed to the client. It is a phone call for you.</span>' + (o.flags && o.flags.call_attempts ? '<br><span class="small">Attempts so far: ' + h(o.flags.call_attempts) + '</span>' : '') +
+        (c.phone ? '<div style="margin-top:8px"><a class="btn red small" href="tel:' + h(c.phone) + '">Call ' + h(c.phone) + '</a></div>' : '<div class="small" style="margin-top:6px">No phone number on file. Try their email: ' + h(c.email) + '</div>') + '</div>' +
+        '<div class="field" style="flex-basis:100%"><label for="cnote">How did the call go? (your notes)</label><textarea id="cnote" placeholder="e.g. Found it 8% cheaper elsewhere. I offered to match it."></textarea></div>' +
+        '<button class="btn" id="c-save">Sale saved: send the quote again</button> <button class="btn ghost" id="c-none">No answer: try again tomorrow</button> <button class="btn ghost red" id="c-lost">Not going ahead: close it</button>';
+    }
+    var tl = o.timeline.map(function (x) { return '<li class="' + h(x.kind) + '"><strong>' + S.dateTime(x.ts) + '</strong> ' + h(x.summary) + '</li>'; }).join('');
+    $('#drawer-mount').innerHTML = '<div class="drawer-bg" id="dbg"></div><aside class="drawer" id="drawer" aria-label="Order ' + h(o.orderId) + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:start"><div><h2 style="margin:0">' + h(o.orderId) + '</h2>' + S.stagePill(o.stage) + ' <span class="pill grey">' + h(c.type) + '</span></div><button class="btn small ghost" id="dx">Close</button></div>' +
+      '<div class="notice" style="margin-top:14px"><strong>' + h(c.name) + '</strong>' + (c.company ? ' · ' + h(c.company) : '') + '<br><a href="mailto:' + h(c.email) + '">' + h(c.email) + '</a>' + (c.phone ? ' · <a href="tel:' + h(c.phone) + '">' + h(c.phone) + '</a>' : '') +
+      (c.address || c.postcode ? '<br><span class="small">' + h([c.address, c.postcode].filter(Boolean).join(', ')) + '</span>' : '') + '<br><span class="tiny muted">Online account: ' + (c.hasLogin ? 'yes' : 'not yet (created when they accept)') + ' · source: ' + h(o.source) + '</span></div>' +
+      (o.measure ? '<div class="notice amber small"><strong>Measure-up visit</strong><br>Site: ' + h(o.siteAddress) + '' + (o.measureNotes ? '<br>Notes: ' + h(o.measureNotes) : '') + '</div>' : '') +
+      '<h3 style="margin-top:16px">Quote ' + (editable() ? '<span class="tiny muted" style="font-weight:400">(edit quantities, then send. Prices are re-checked on the website when you send.)</span>' : '') + '</h3>' + ln + add +
+      '<div class="totals" style="max-width:300px;margin-left:auto"><div><span>Subtotal (ex VAT)</span><span>' + S.money(t.sub) + '</span></div><div><span>VAT (' + o.vatPct + '%)</span><span>' + S.money(t.vat) + '</span></div><div class="grand"><span>Total</span><span>' + S.money(t.total) + '</span></div></div>' +
+      '<div class="tiny muted">Mark-up applied: ' + h(o.markupPct) + '% on website prices</div>' +
+      '<div class="actions">' + act + '</div>' +
+      '<h3 style="margin-top:22px">Notes</h3><div class="field"><textarea id="note" placeholder="Add a note for yourself or the team"></textarea></div><button class="btn small ghost" id="addnote">Save note</button> <button class="btn small ghost" id="login">Email login details</button> <button class="btn small ghost" id="copy">Copy client quote link</button>' +
+      (o.notes ? '<pre style="white-space:pre-wrap;font:inherit;font-size:.82rem;background:var(--bg);padding:10px;border-radius:6px;margin-top:10px">' + h(o.notes) + '</pre>' : '') +
+      '<h3 style="margin-top:22px">Timeline</h3><ul class="tl">' + tl + '</ul></aside>';
+    wireDrawer();
+  }
+
+  function act(action, payload, okMsg, btn) {
+    if (btn) S.busy(btn, true, 'Working…');
+    return A('adminAction', cur.orderId, action, payload || {}).then(function (o) {
+      cur = o; edit = o.lines.map(function (l) { return { id: l.id, code: l.code, name: l.name, qty: l.qty, unit: l.unit }; });
+      if (okMsg) S.toast(okMsg, 'ok'); drawDrawer(); A('adminBoard').then(function (b) { board = b; setBadge(); if (tab === 'pipeline') drawPipeline(); else if (tab === 'tasks') drawTasks(); });
+    }).catch(function (e) { if (btn) S.busy(btn, false); fail(e); });
+  }
+
+  function visitAct(action, payload, btn, force) {
+    payload.force = !!force;
+    return A('adminAction', cur.orderId, action, payload).then(function (o) {
+      cur = o; edit = o.lines.map(function (l) { return { id: l.id, code: l.code, name: l.name, qty: l.qty, unit: l.unit }; });
+      S.toast('Visit confirmed. The client has been emailed.', 'ok'); drawDrawer(); A('adminBoard').then(function (b) { board = b; setBadge(); if (tab === 'pipeline') drawPipeline(); else if (tab === 'tasks') drawTasks(); });
+    }).catch(function (e) {
+      if (/^CLASH/.test(e.message) && !force && confirm('That time clashes with something else in your calendar. Book it anyway?')) return visitAct(action, payload, btn, true);
+      if (btn) S.busy(btn, false); fail(/^CLASH/.test(e.message) ? new Error('That time clashes with something else in your calendar.') : e);
+    });
+  }
+  function approveSlot(i, btn) { if (btn) S.busy(btn, true, 'Confirmingâ¦'); return visitAct('approveVisit', { slot: i }, btn); }
+  function bookTime(v, btn) { S.busy(btn, true, 'Bookingâ¦'); return visitAct('bookVisit', { start: v }, btn); }
+
+  function wireDrawer() {
+    $('#dx').addEventListener('click', closeDrawer); $('#dbg').addEventListener('click', closeDrawer);
+    var on = function (id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); };
+    on('#sendq', function () {
+      if (!edit.length) return S.toast('Add at least one product first.', 'err');
+      act('sendQuote', { items: edit.map(function (l) { return { id: l.id, qty: l.qty }; }), note: ($('#qnote') || {}).value || '' }, 'Quote emailed to ' + cur.customerFull.email, this);
+    });
+    on('#remind', function () { act('sendReminder', {}, 'Reminder emailed', this); });
+    on('#paid', function () { if (confirm('Mark this order as paid? The client will be sent a payment confirmation.')) act('markPaid', {}, 'Marked as paid. Confirmation emailed.', this); });
+    S.$$('#drawer [data-appr]').forEach(function (b) { b.addEventListener('click', function () { approveSlot(Number(b.dataset.appr), b); }); });
+    on('#bookb', function () { var v = ($('#bk') || {}).value; if (!v) return S.toast('Choose a date and time first.', 'err'); bookTime(v, this); });
+    on('#disp', function () { act('dispatch', { note: ($('#dnote') || {}).value || '' }, 'Client told their order is on its way', this); });
+    on('#deliv', function () { act('delivered', {}, 'Marked as delivered. Client thanked automatically.', this); });
+    on('#lost', function () { if (confirm('Close this quote as lost? You can still re-open it from the pipeline later.')) act('markLost', { text: 'Closed by Steve' }, 'Closed', this); });
+    var cn = function () { return ($('#cnote') || {}).value || ''; };
+    on('#c-save', function () { act('callOutcome', { outcome: 'resend', text: cn() }, 'Sale saved. The quote has been sent to ' + cur.customerFull.name + ' again.', this); });
+    on('#c-none', function () { act('callOutcome', { outcome: 'noanswer', text: cn() }, 'Logged. A new call task is set for tomorrow.', this); });
+    on('#c-lost', function () { if (confirm('Close this quote as lost?')) act('callOutcome', { outcome: 'lost', text: cn() }, 'Closed', this); });
+    on('#addnote', function () { act('addNote', { text: $('#note').value }, 'Note saved', this); });
+    on('#login', function () { if (confirm('Email login details to ' + cur.customerFull.email + '? This sets a new temporary password.')) act('inviteLogin', {}, 'Login details emailed', this); });
+    on('#copy', function () { var url = cur.quoteUrl; (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function () { S.toast('Link copied', 'ok'); }, function () { prompt('Copy this link:', url); }); });
+    S.$$('#drawer input[data-i]').forEach(function (i) { i.addEventListener('change', function () { var q = Math.floor(Number(this.value)); edit[Number(this.dataset.i)].qty = q >= 1 ? Math.min(q, 9999) : 1; drawDrawer(); }); });
+    S.$$('#drawer [data-rm]').forEach(function (b) { b.addEventListener('click', function () { edit.splice(Number(this.dataset.rm), 1); drawDrawer(); }); });
+    on('#addb', function () {
+      var v = $('#addp').value.split('|')[0].trim(), q = Math.max(1, Math.floor(Number($('#addq').value)) || 1);
+      var p = catalogue.products.filter(function (x) { return x.code === v; })[0];
+      if (!p) return S.toast('Choose a product from the list.', 'err');
+      var ex = edit.filter(function (l) { return l.id === p.id; })[0];
+      if (ex) ex.qty += q; else edit.push({ id: p.id, code: p.code, name: p.name, qty: q, unit: p.price });
+      drawDrawer();
+    });
+  }
+
+  // ---- tasks ------------------------------------------------------------------------------------
+  function setBadge() { var n = (board && board.tasks || []).length, el = $('#tbadge'); if (!el) return; el.style.display = n ? 'inline-block' : 'none'; el.textContent = n; }
+  function showTasks() { A('adminBoard').then(function (b) { board = b; setBadge(); drawTasks(); }).catch(fail); }
+  function dueLabel(t) {
+    var hrs = (new Date(t.due).getTime() - Date.now()) / 3600000;
+    if (hrs < 0) return '<span class="pill red">Overdue</span>';
+    if (hrs < 24) return '<span class="pill amber">Due today</span>';
+    return '<span class="pill grey">Due ' + h(vDay(t.due)) + '</span>';
+  }
+  function drawTasks() {
+    var list = board.tasks || [];
+    var groups = [['call', 'Calls to try to save a sale', 'The client declined. Nothing was emailed to them: ring them and see what you can do.'],
+      ['approve', 'Visit times to approve', 'The client has asked for a measure-up visit. Nothing is confirmed to them until you approve a time.'],
+      ['deliver', 'Orders to deliver', 'Paid and waiting to go out. Tapping Out for delivery emails the client.']];
+    var html = '<h2>Your tasks</h2><p class="muted small">Everything waiting on you, in one place. A task disappears as soon as you deal with it.</p>';
+    if (!list.length) html += '<div class="notice green">Nothing waiting. When a client declines a quote, asks for a visit, or pays, a task appears here.</div>';
+    groups.forEach(function (g) {
+      var rows = list.filter(function (t) { return t.type === g[0]; });
+      if (!rows.length) return;
+      html += '<div class="card sectionbox"><h3>' + h(g[1]) + ' <span class="pill grey">' + rows.length + '</span></h3><p class="small muted" style="margin-top:-4px">' + h(g[2]) + '</p>' + rows.map(function (t) {
+        return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)"><div style="flex:1;min-width:240px"><strong>' + h(t.title) + '</strong> ' + dueLabel(t) +
+          '<div class="small muted">' + h(t.orderId) + ' · ' + S.money(t.total) + ' · ' + h(t.detail) + (t.attempts ? ' · ' + t.attempts + ' call attempt' + (t.attempts === 1 ? '' : 's') : '') + '</div>' +
+          '<div class="small">' + (t.phone ? '<a href="tel:' + h(t.phone) + '">' + h(t.phone) + '</a> · ' : '') + '<a href="mailto:' + h(t.email) + '">' + h(t.email) + '</a></div></div>' +
+          (t.type === 'call' && t.phone ? '<a class="btn red small" href="tel:' + h(t.phone) + '">Call now</a>' : '') + '<button class="btn small ghost" data-open="' + h(t.orderId) + '">Open</button></div>';
+      }).join('') + '</div>';
+    });
+    view.innerHTML = html;
+    S.$$('[data-open]').forEach(function (b) { b.addEventListener('click', function () { openOrder(b.dataset.open); }); });
+  }
+
+  // ---- automations ------------------------------------------------------------------------------
+  function showAutomations() {
+    A('adminAutomations').then(function (a) {
+      var s = a.summary, groups = {}, order = [];
+      a.emails.forEach(function (e) { if (!groups[e.group]) { groups[e.group] = []; order.push(e.group); } groups[e.group].push(e); });
+      var html = '<h2>Automations</h2><div class="notice"><strong>Everything the system does so you do not have to.</strong> Each email below is sent automatically, to the right person, at the right moment, and is logged against the order. No typing it up when you are back from a visit, a call or a delivery.</div>' +
+        '<div class="kpis"><div class="tile"><div class="l">Emails sent to clients for you</div><div class="v">' + s.clientEmails + '</div><div class="tiny muted">since the demo started</div></div>' +
+        '<div class="tile"><div class="l">Time saved</div><div class="v">≈ ' + fmtMins(s.minutesSaved) + '</div><div class="tiny muted">at ' + s.minutesPerEmail + ' min per email (change in Settings)</div></div>' +
+        '<div class="tile"><div class="l">Reminders and follow-ups</div><div class="v">' + (a.followupsOn ? 'On' : 'Paused') + '</div><div class="tiny muted">checked every hour</div></div></div>' +
+        '<h3>Try it: the moments that used to mean emails</h3><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr))">' +
+        [['Back from a measure-up', 'Open the order, adjust the quantities, press Send quote. The client has it in their inbox before you have left the car park.', 'Open the pipeline', 'go'],
+         ['Just off the phone with a client', 'Build the quote in a minute, even from your phone. It is emailed to them straight away.', '+ New quote for a client', 'nq'],
+         ['Delivery done', 'Open a paid order and tap Out for delivery, then Delivered. The client is told each time, and invited to re-order 3 days later.', 'Open the pipeline', 'go'],
+         ['Waiting on a client', 'No chasing. Quote reminders and payment reminders send themselves.', 'Pretend 3 days have passed', 'ff'],
+         ['Client says no', 'No email goes to them. It becomes a call task for you, with their number, their reason and the quote in front of you.', 'Open your tasks', 'tasks'],
+         ['Visit tomorrow', 'Once you confirm a visit the client is reminded 24 hours before, automatically. Press this to send the reminders as if it were the day before.', 'Send visit reminders now', 'vr'],
+         ['Monthly offers', 'On the 1st of every month each client gets that month\'s offer. It drafts itself, and you can edit it first.', 'Open monthly offers', 'promotions'],
+         ['Running low', 'The system learns when each client runs out of everyday products and sends the quote before they have to ask.', 'Open restock predictions', 'restock']].map(function (c) {
+          return '<div class="card" style="padding:16px"><h3>' + h(c[0]) + '</h3><p class="small muted" style="min-height:72px">' + h(c[1]) + '</p><button class="btn small ghost" data-sc="' + c[3] + '">' + h(c[2]) + '</button></div>'; }).join('') + '</div>' +
+        '<div class="card sectionbox" style="margin-top:18px"><div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap"><div style="flex:1;min-width:260px"><label for="smp">Send sample emails to</label><input type="email" id="smp" value="' + h((board && board.alertEmail) || '') + '"></div><button class="btn ghost" id="smp-all">Send me all of them</button></div>' +
+        '<p class="tiny muted" style="margin:6px 0 0">Samples are marked [SAMPLE] and do not count towards the figures above.</p></div>';
+      order.forEach(function (g) {
+        html += '<div class="card sectionbox" style="overflow-x:auto"><h3>' + h(g) + '</h3><table class="t"><thead><tr><th>Email</th><th>To</th><th>Sent when</th><th class="num">Sent</th><th class="num">Last sent</th><th></th></tr></thead><tbody>' +
+          groups[g].map(function (e) { return '<tr><td><strong>' + h(e.name) + '</strong></td><td><span class="pill ' + (e.to === 'Steve' ? 'grey' : '') + '">' + h(e.to) + '</span></td><td class="small">' + h(e.when) + '</td><td class="num">' + e.sent + '</td><td class="num tiny muted">' + (e.last ? ago(e.last) : '-') + '</td><td class="num"><button class="btn small ghost" data-smp="' + h(e.id) + '">Send me this one</button></td></tr>'; }).join('') + '</tbody></table></div>';
+      });
+      view.innerHTML = html;
+      S.$$('[data-sc]').forEach(function (b) { b.addEventListener('click', function () {
+        var k = b.dataset.sc;
+        if (k === 'go') go('pipeline'); else if (k === 'tasks') go('tasks'); else if (k === 'promotions') go('promotions'); else if (k === 'restock') go('restock'); else if (k === 'nq') openNewQuote();
+        else if (k === 'vr') { S.busy(b, true, 'Sending…'); A('adminRunAutomations', 0, true).then(function (r) { S.busy(b, false); S.toast(r.sent ? r.sent + ' visit reminder(s) sent' : 'No confirmed visits are waiting for a reminder.', 'ok'); showAutomations(); }).catch(function (e) { S.busy(b, false); fail(e); }); }
+        else { S.busy(b, true, 'Running…'); A('adminRunAutomations', 3).then(function (r) { S.busy(b, false); S.toast(r.note, 'ok'); showAutomations(); }).catch(function (e) { S.busy(b, false); fail(e); }); }
+      }); });
+      S.$$('[data-smp]').forEach(function (b) { b.addEventListener('click', function () {
+        S.busy(b, true, 'Sending…'); A('adminTestEmail', $('#smp').value, b.dataset.smp).then(function () { S.busy(b, false); S.toast('Sample sent to ' + $('#smp').value, 'ok'); }).catch(function (e) { S.busy(b, false); fail(e); });
+      }); });
+      $('#smp-all').addEventListener('click', function () {
+        var b = this; S.busy(b, true, 'Sending…'); A('adminTestEmail', $('#smp').value).then(function (r) { S.busy(b, false); S.toast(r.sent + ' sample emails sent to ' + r.to, 'ok'); }).catch(function (e) { S.busy(b, false); fail(e); });
+      });
+    }).catch(fail);
+  }
+
+  // ---- steve creates a quote himself ---------------------------------------------------------------
+  function openNewQuote() {
+    ensureCatalogue().then(function (c) {
+      var items = [];
+      var m = S.modal('<h2 style="margin-bottom:4px">New quote for a client</h2><p class="small muted">Just off the phone or back from a visit? Fill this in and the client is emailed their quote straight away. Their record, the quote and the follow-up reminders are all set up for you.</p>' +
+        '<div class="row2"><div class="field"><label for="n-name">Client name *</label><input type="text" id="n-name"></div><div class="field"><label for="n-email">Client email *</label><input type="email" id="n-email"></div></div>' +
+        '<div class="row2"><div class="field"><label for="n-co">Company</label><input type="text" id="n-co"></div><div class="field"><label for="n-ph">Phone</label><input type="tel" id="n-ph"></div></div>' +
+        '<div class="field"><label for="n-addr">Delivery address</label><input type="text" id="n-addr"></div>' +
+        '<h3 style="margin-top:6px">Products</h3><div style="display:flex;gap:6px"><input list="nlist" id="n-p" placeholder="Type a product code or name" style="flex:1"><input type="number" id="n-q" min="1" value="1" style="width:70px"><button class="btn small" id="n-add">Add</button></div>' +
+        '<datalist id="nlist">' + c.products.filter(function (p) { return p.active; }).map(function (p) { return '<option value="' + h(p.code) + ' | ' + h(p.name.slice(0, 70)) + '">'; }).join('') + '</datalist>' +
+        '<div id="n-lines" style="margin:8px 0"></div><div class="field"><label for="n-note">Message to include (optional)</label><textarea id="n-note" placeholder="e.g. Good to speak today. As discussed, I have included free delivery on this one."></textarea></div>' +
+        '<div class="err" id="n-err"></div><div class="actions"><button class="btn red" id="n-send">Send quote to client</button><button class="btn ghost" id="n-x">Cancel</button></div>', { sticky: true });
+      m.firstChild.style.maxWidth = '760px';
+      function draw() {
+        var sub = 0; items.forEach(function (l) { sub += l.unit * l.qty; }); sub = Math.round(sub * 100) / 100; var vat = Math.round(sub * c.vatPct) / 100;
+        $('#n-lines', m).innerHTML = items.length ? '<table class="t"><tbody>' + items.map(function (l, i) { return '<tr><td>' + h(l.name) + '<div class="tiny muted">' + h(l.code) + ' · ' + S.money(l.unit) + ' each</div></td><td class="num"><input type="number" min="1" value="' + l.qty + '" data-i="' + i + '" style="width:70px"></td><td class="num">' + S.money(l.unit * l.qty) + '</td><td class="num"><button class="btn small ghost red" data-rm="' + i + '">&times;</button></td></tr>'; }).join('') +
+          '</tbody></table><div class="right" style="margin-top:6px"><strong>Estimated total ' + S.money(sub + vat) + ' inc VAT</strong> <span class="tiny muted">(final prices are re-checked on the website when you send)</span></div>' : '<p class="small muted">No products added yet.</p>';
+        S.$$('input[data-i]', m).forEach(function (i) { i.addEventListener('change', function () { var q = Math.floor(Number(this.value)); items[Number(this.dataset.i)].qty = q >= 1 ? Math.min(q, 9999) : 1; draw(); }); });
+        S.$$('[data-rm]', m).forEach(function (b) { b.addEventListener('click', function () { items.splice(Number(this.dataset.rm), 1); draw(); }); });
+      }
+      c.vatPct = c.vatPct || 20; draw();
+      $('#n-x', m).addEventListener('click', m.close);
+      $('#n-add', m).addEventListener('click', function () {
+        var code = $('#n-p', m).value.split('|')[0].trim(), q = Math.max(1, Math.floor(Number($('#n-q', m).value)) || 1);
+        var p = c.products.filter(function (x) { return x.code === code; })[0];
+        if (!p) return S.toast('Choose a product from the list.', 'err');
+        var ex = items.filter(function (l) { return l.id === p.id; })[0];
+        if (ex) ex.qty += q; else items.push({ id: p.id, code: p.code, name: p.name, qty: q, unit: p.price });
+        $('#n-p', m).value = ''; $('#n-q', m).value = 1; draw();
+      });
+      $('#n-send', m).addEventListener('click', function () {
+        var b = this; $('#n-err', m).textContent = '';
+        if (!items.length) { $('#n-err', m).textContent = 'Add at least one product first.'; return; }
+        S.busy(b, true, 'Checking prices and sending…');
+        A('adminCreateQuote', { name: $('#n-name', m).value, email: $('#n-email', m).value, company: $('#n-co', m).value, phone: $('#n-ph', m).value, address: $('#n-addr', m).value,
+          items: items.map(function (l) { return { id: l.id, qty: l.qty }; }), note: $('#n-note', m).value })
+          .then(function (r) { m.close(); S.toast('Quote ' + r.orderId + ' emailed to ' + $('#n-email', m).value, 'ok'); catalogue = null; if (tab === 'pipeline') showPipeline(); else if (tab === 'automations') showAutomations(); })
+          .catch(function (e) { S.busy(b, false); $('#n-err', m).textContent = e.message; });
+      });
+    }).catch(fail);
+  }
+
+  // ---- monthly offers ---------------------------------------------------------------------------
+  var promo = null, pedit = null;
+  function ordinal(n) { var s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+  function monthName(key) { return new Date(key + '-01T12:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); }
+  function showPromotions() { A('adminPromotions').then(function (r) { promo = r; pedit = JSON.parse(JSON.stringify(r.next)); drawPromotions(); }).catch(fail); }
+  function drawPromotions() {
+    var n = promo.next, a = promo.audience, locked = n.status !== 'draft';
+    var sendDay = ordinal(promo.day) + ' of ' + monthName(n.month).split(' ')[0];
+    var items = pedit.items.map(function (it, i) {
+      var offer = Math.round(it.price * (1 - it.pct / 100) * 100) / 100;
+      return '<tr><td style="width:56px"><img src="' + h(it.img) + '" alt="" style="width:48px;height:48px;object-fit:contain"></td><td>' + h(it.name) + '<div class="tiny muted">Code ' + h(it.code) + '</div></td><td class="num"><s class="muted">' + S.money(it.price) + '</s><br><strong>' + S.money(offer) + '</strong></td>' +
+        '<td class="num"><input type="number" min="1" max="90" value="' + it.pct + '" data-pct="' + i + '" style="width:64px"' + (locked ? ' disabled' : '') + '> %</td><td class="num">' + (locked ? '' : '<button class="btn small ghost red" data-rm="' + i + '">&times;</button>') + '</td></tr>';
+    }).join('');
+    var hist = promo.history.map(function (p) { return '<tr><td>' + h(monthName(p.month)) + '</td><td>' + h(p.title) + '</td><td class="num">' + p.sentCount + '</td><td class="num">' + p.orders + '</td><td class="num">' + S.money(p.orderValue) + '</td><td>' + (p.status === 'sent' ? '<span class="pill green">Sent</span>' : '<span class="pill amber">Sending</span>') + '</td></tr>'; }).join('');
+    view.innerHTML = '<h2>Monthly offers</h2><div class="notice"><strong>Offers go out on their own.</strong> On the ' + ordinal(promo.day) + ' of every month, every client who has not opted out is emailed that month\'s offer, with special prices that apply on the order page while it is valid. ' +
+      'The offer drafts itself from a theme for the month and the products your clients actually buy. Edit it below, or leave it alone and it still goes.</div>' +
+      '<div class="kpis"><div class="tile"><div class="l">Monthly emails</div><div class="v">' + (promo.enabled ? 'On' : 'Off') + '</div><div class="tiny muted">' + (promo.firstMonth ? 'first automatic send: ' + h(monthName(promo.firstMonth)) : '') + '</div></div>' +
+      '<div class="tile"><div class="l">Will receive the next offer</div><div class="v">' + a.eligible + '</div><div class="tiny muted">of ' + a.total + ' clients</div></div>' +
+      '<div class="tile"><div class="l">Unsubscribed</div><div class="v">' + a.optedOut + '</div><div class="tiny muted">always respected</div></div></div>' +
+      '<div class="card sectionbox"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0">' + (locked ? 'This month\'s offer' : 'Next offer: ' + h(monthName(n.month))) + '</h3>' +
+      '<span>' + (n.auto ? '<span class="pill grey">Drafted automatically</span>' : '<span class="pill">Edited by you</span>') + (locked ? ' <span class="pill green">Sent</span>' : ' <span class="pill amber">Goes out ' + h(sendDay) + '</span>') + '</span></div>' +
+      '<div class="field" style="margin-top:12px"><label for="p-title">Headline</label><input type="text" id="p-title" value="' + h(pedit.title) + '"' + (locked ? ' disabled' : '') + '></div>' +
+      '<div class="field"><label for="p-intro">Message</label><textarea id="p-intro"' + (locked ? ' disabled' : '') + '>' + h(pedit.intro) + '</textarea></div>' +
+      '<table class="t"><thead><tr><th></th><th>Product</th><th class="num">Price</th><th class="num">Discount</th><th></th></tr></thead><tbody>' + (items || '<tr><td colspan="5" class="muted">No products yet.</td></tr>') + '</tbody></table>' +
+      (locked ? '' : '<div style="display:flex;gap:6px;margin:10px 0"><input list="plist2" id="p-add" placeholder="Add a product: type a code or name" style="flex:1"><button class="btn small" id="p-addb">Add</button></div><datalist id="plist2">' +
+        promo.products.map(function (p) { return '<option value="' + h(p.code) + ' | ' + h(p.name.slice(0, 70)) + '">'; }).join('') + '</datalist>') +
+      '<div class="err" id="p-err"></div><div class="actions">' + (locked ? '' : '<button class="btn" id="p-save">Save changes</button>') +
+      '<button class="btn ghost" id="p-test">Send me a test</button>' + (locked ? '' : '<button class="btn ghost red" id="p-now">Send to ' + a.eligible + ' client' + (a.eligible === 1 ? '' : 's') + ' now</button>') + '</div>' +
+      (locked ? '' : '<p class="tiny muted">If you do nothing, this goes out automatically on the ' + h(sendDay) + '.</p>') + '</div>' +
+      '<div class="card" style="overflow-x:auto"><h3>Past offers</h3><table class="t"><thead><tr><th>Month</th><th>Offer</th><th class="num">Emails sent</th><th class="num">Orders from it</th><th class="num">Value</th><th></th></tr></thead><tbody>' + (hist || '<tr><td colspan="6" class="muted">Nothing has gone out yet.</td></tr>') + '</tbody></table></div>';
+    S.$$('[data-pct]').forEach(function (i) { i.addEventListener('change', function () { var v = Math.floor(Number(this.value)); pedit.items[Number(this.dataset.pct)].pct = v >= 1 ? Math.min(v, 90) : 1; syncPromoText(); drawPromotions(); }); });
+    S.$$('[data-rm]').forEach(function (b) { b.addEventListener('click', function () { syncPromoText(); pedit.items.splice(Number(this.dataset.rm), 1); drawPromotions(); }); });
+    var addb = $('#p-addb'); if (addb) addb.addEventListener('click', function () {
+      var code = $('#p-add').value.split('|')[0].trim(), pr = promo.products.filter(function (x) { return x.code === code; })[0];
+      if (!pr) return S.toast('Choose a product from the list.', 'err');
+      if (pedit.items.some(function (x) { return x.id === pr.id; })) return S.toast('That product is already in the offer.', 'err');
+      syncPromoText(); pedit.items.push({ id: pr.id, pct: 5, code: pr.code, name: pr.name, img: '', price: pr.price }); drawPromotions();
+    });
+    var sv = $('#p-save'); if (sv) sv.addEventListener('click', function () { savePromo(this); });
+    $('#p-test').addEventListener('click', function () {
+      var b = this, to = prompt('Send a test of this offer email to:', (board && board.alertEmail) || ''); if (!to) return;
+      var go = function () { S.busy(b, true, 'Sending…'); return A('adminPromoTest', n.id, to).then(function () { S.busy(b, false); S.toast('Test sent to ' + to, 'ok'); }).catch(function (e) { S.busy(b, false); fail(e); }); };
+      if (locked) go(); else savePromo(null, go);
+    });
+    var nowb = $('#p-now'); if (nowb) nowb.addEventListener('click', function () {
+      var b = this; if (!confirm('Send this offer to ' + a.eligible + ' client(s) now? It will not be sent again on the ' + sendDay + '.')) return;
+      savePromo(null, function () { S.busy(b, true, 'Sending…'); return A('adminPromoSendNow', n.id).then(function (r) { S.toast('Sent to ' + r.sent + ' client(s)', 'ok'); showPromotions(); }).catch(function (e) { S.busy(b, false); fail(e); }); });
+    });
+  }
+  function syncPromoText() { var t = $('#p-title'), i = $('#p-intro'); if (t) pedit.title = t.value; if (i) pedit.intro = i.value; }
+  function savePromo(btn, then) {
+    syncPromoText(); if (btn) S.busy(btn, true, 'Saving…'); $('#p-err').textContent = '';
+    return A('adminSavePromotion', { id: pedit.id, title: pedit.title, intro: pedit.intro, items: pedit.items.map(function (x) { return { id: x.id, pct: x.pct }; }) })
+      .then(function (r) { promo.next = r; pedit = JSON.parse(JSON.stringify(r)); if (btn) { S.busy(btn, false); S.toast('Saved', 'ok'); drawPromotions(); } if (then) return then(); })
+      .catch(function (e) { if (btn) S.busy(btn, false); $('#p-err').textContent = e.message; });
+  }
+
+  // ---- restock predictions ----------------------------------------------------------------------
+  var rs = null;
+  function showRestock() { A('adminRestock').then(function (r) { rs = r; drawRestock(); }).catch(fail); }
+  function daysTo(iso) { return Math.round((new Date(iso).getTime() - Date.now()) / 86400000); }
+  function drawRestock() {
+    var P = rs.predictions, due = P.filter(function (p) { return p.status === 'due'; }).length, st = rs.stats;
+    var rows = P.map(function (p) {
+      var d = daysTo(p.nextDue), stat;
+      if (p.status === 'learning') stat = '<span class="pill grey">Learning: needs ' + p.needs + ' more purchase' + (p.needs === 1 ? '' : 's') + '</span>';
+      else if (p.status === 'quoted') stat = '<span class="pill green">Quote sent</span>';
+      else if (p.status === 'skipped') stat = '<span class="pill grey">Skipped this time</span>';
+      else if (p.status === 'due') stat = '<span class="pill red">Due: quote goes out automatically</span>';
+      else stat = '<span class="pill">Quote goes out in ' + Math.max(0, d - rs.leadDays) + ' day' + (Math.max(0, d - rs.leadDays) === 1 ? '' : 's') + '</span>';
+      var canAct = p.status === 'due' || p.status === 'upcoming';
+      return '<tr><td><strong>' + h(p.company || p.name_c) + '</strong><div class="tiny muted">' + h(p.name_c) + (p.optedOut ? ' · opted out of reminders' : '') + '</div></td><td>' + h(p.name.replace(/\s+[A-Z0-9-]{5,}$/, '').slice(0, 58)) + '<div class="tiny muted">' + h(p.code) + '</div></td>' +
+        '<td>' + p.qty + ' at a time,<br>every ' + p.everyDays + ' days<div class="tiny muted">' + p.purchases + ' purchases</div></td><td>Last: ' + S.date(p.lastBought) + '<br>Next: <strong>' + S.date(p.nextDue) + '</strong><div class="tiny muted">' + (d < 0 ? Math.abs(d) + ' days ago' : 'in ' + d + ' days') + '</div></td>' +
+        '<td><span class="pill ' + ({ High: 'green', Medium: '', Low: 'grey' }[p.confidence] || '') + '">' + h(p.confidence) + '</span></td><td>' + stat + (canAct ? '<div style="margin-top:6px"><button class="btn small ghost" data-send="' + h(p.customerId) + '|' + h(p.productId) + '">Send quote now</button> <button class="btn small ghost red" data-skip="' + h(p.customerId) + '|' + h(p.productId) + '">Skip</button></div>' : '') + '</td></tr>';
+    }).join('');
+    view.innerHTML = '<h2>Restock predictions</h2><div class="notice"><strong>The system learns when each client runs out.</strong> From their order history it works out how often they buy each everyday product (paper, pens, toner, tea&hellip;) and how many. ' +
+      'Once it has seen at least <strong>' + rs.minPurchases + ' purchases</strong> it predicts the next one, and <strong>' + rs.leadDays + ' days before they run out</strong> it sends a ready-made quote for their usual quantity. They accept in one click. Furniture and one-off items are never predicted.</div>' +
+      '<div class="kpis"><div class="tile"><div class="l">Automatic restock quotes</div><div class="v">' + (rs.enabled ? 'On' : 'Off') + '</div><div class="tiny muted">change in Settings</div></div>' +
+      '<div class="tile"><div class="l">Due now</div><div class="v">' + due + '</div><div class="tiny muted">going out automatically</div></div>' +
+      '<div class="tile"><div class="l">Sent so far</div><div class="v">' + st.sent + '</div><div class="tiny muted">' + st.won + ' accepted</div></div>' +
+      '<div class="tile"><div class="l">Won from restock quotes</div><div class="v">' + S.money(st.wonValue) + '</div><div class="tiny muted">inc VAT</div></div></div>' +
+      '<div class="card sectionbox" style="overflow-x:auto"><h3>What it has learned</h3><table class="t"><thead><tr><th>Client</th><th>Product</th><th>Pattern</th><th>Runs out</th><th>Confidence</th><th>Status</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6" class="muted">Nothing to predict yet. When a client has bought the same everyday product a few times, it shows up here.</td></tr>') + '</tbody></table></div>' +
+      '<div class="card"><h3>Try it</h3><p class="small muted">The demo has no history yet. Give a client a believable past, then run the check and watch a quote go out by itself.</p>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"><div style="flex:1;min-width:240px"><label for="sh-c">Client</label><select id="sh-c">' + rs.clients.map(function (c) { return '<option value="' + h(c.email) + '">' + h((c.company ? c.company + ' · ' : '') + c.name + ' (' + c.email + ')') + '</option>'; }).join('') + '</select></div>' +
+      '<button class="btn ghost" id="sh-go">Give them 3 months of order history</button></div>' +
+      '<div class="actions"><button class="btn" id="rc-now">Run the restock check now</button><button class="btn ghost" id="rc-10">Pretend 10 days have passed, then check</button></div></div>';
+    S.$$('[data-send]').forEach(function (b) { b.addEventListener('click', function () { var x = b.dataset.send.split('|'); S.busy(b, true, 'Sending…'); A('adminRestockAction', x[0], 'send', [x[1]]).then(function (r) { rs = r; S.toast('Quote sent to the client', 'ok'); drawRestock(); }).catch(function (e) { S.busy(b, false); fail(e); }); }); });
+    S.$$('[data-skip]').forEach(function (b) { b.addEventListener('click', function () { var x = b.dataset.skip.split('|'); A('adminRestockAction', x[0], 'skip', [x[1]]).then(function (r) { rs = r; drawRestock(); }).catch(fail); }); });
+    var sh = $('#sh-go'); if (sh) sh.addEventListener('click', function () { var b = this; S.busy(b, true, 'Adding…'); A('adminSeedHistory', { email: $('#sh-c').value }).then(function (r) { S.toast(r.added + ' past orders added', 'ok'); showRestock(); }).catch(function (e) { S.busy(b, false); fail(e); }); });
+    var run = function (b, days) { S.busy(b, true, 'Checking…'); A('adminRunAutomations', days, false).then(function (r) { S.toast(r.note, 'ok'); showRestock(); }).catch(function (e) { S.busy(b, false); fail(e); }); };
+    $('#rc-now').addEventListener('click', function () { run(this, 0); });
+    $('#rc-10').addEventListener('click', function () { run(this, 10); });
+  }
+
+  // ---- clients ----------------------------------------------------------------------------------
+  function showCustomers() {
+    A('adminCustomers').then(function (list) {
+      var rows = list.map(function (c) {
+        return '<tr><td><strong>' + h(c.name) + '</strong><div class="tiny muted">' + h(c.id) + '</div></td><td>' + h(c.company || '-') + '</td><td><a href="mailto:' + h(c.email) + '">' + h(c.email) + '</a><div class="tiny muted">' + h(c.phone) + '</div></td>' +
+          '<td><span class="pill ' + (c.type === 'Existing client' ? 'green' : '') + '">' + h(c.type) + '</span></td><td class="num">' + c.orders + '</td><td class="num">' + S.money(c.paidValue) + '</td><td>' + (c.hasLogin ? 'Yes' + (c.lastLogin ? '<div class="tiny muted">last ' + ago(c.lastLogin) + '</div>' : '') : 'Not yet') + '</td></tr>';
+      }).join('');
+      view.innerHTML = '<h2>Clients</h2><div class="card sectionbox"><h3>Add an existing client</h3><p class="small muted">Sets up their online account and emails them a welcome with login details. Try it with your own email address to see exactly what a client receives.</p>' +
+        '<div class="row2" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end"><div><label for="in-n">Name</label><input type="text" id="in-n"></div><div><label for="in-e">Email</label><input type="email" id="in-e"></div><div><label for="in-c">Company</label><input type="text" id="in-c"></div><button class="btn" id="in-go">Add and email invite</button></div><div class="err" id="in-err"></div></div>' +
+        '<div class="card" style="overflow-x:auto"><table class="t"><thead><tr><th>Name</th><th>Company</th><th>Contact</th><th>Type</th><th class="num">Orders</th><th class="num">Paid</th><th>Online login</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="7" class="muted">No clients yet. They appear here the moment someone asks for a quote.</td></tr>') + '</tbody></table></div>';
+      $('#in-go').addEventListener('click', function () {
+        var b = this; $('#in-err').textContent = ''; S.busy(b, true, 'Sending…');
+        A('adminInvite', { name: $('#in-n').value, email: $('#in-e').value, company: $('#in-c').value }).then(function () { S.toast('Invitation emailed.', 'ok'); showCustomers(); }).catch(function (e) { S.busy(b, false); $('#in-err').textContent = e.message; });
+      });
+    }).catch(fail);
+  }
+
+  // ---- prices -----------------------------------------------------------------------------------
+  function showPrices() {
+    A('adminCatalogue').then(function (c) { catalogue = c; drawPrices(); }).catch(fail);
+  }
+  function drawPrices(filter) {
+    var c = catalogue, f = (filter || '').toLowerCase();
+    var list = c.products.filter(function (p) { return !f || (p.name + ' ' + p.code + ' ' + p.cat).toLowerCase().indexOf(f) !== -1; });
+    var rows = list.slice(0, 200).map(function (p) {
+      return '<tr><td><a href="' + h(p.url) + '" target="_blank" rel="noopener">' + h(p.code) + '</a></td><td>' + h(p.name) + '<div class="tiny muted">' + h(p.cat) + '</div></td><td class="num">' + S.money(p.site) + '</td><td class="num"><strong>' + S.money(p.price) + '</strong></td><td class="num tiny muted">' + ago(p.updated) + '</td>' +
+        '<td class="num"><label class="small" style="display:inline;font-weight:400"><input type="checkbox" data-meas="' + h(p.id) + '"' + (p.measure ? ' checked' : '') + '> measure-up advised</label><br><label class="small" style="display:inline;font-weight:400"><input type="checkbox" data-rs="' + h(p.id) + '"' + (p.restock ? ' checked' : '') + '> predict restocks</label></td></tr>';
+    }).join('');
+    var log = c.log.map(function (l) { return '<tr><td class="tiny">' + S.dateTime(l.ts) + '</td><td>' + h(l.code) + ' ' + h(l.name.slice(0, 60)) + '</td><td class="num">' + S.money(l.oldEx) + '</td><td class="num">' + S.money(l.newEx) + '</td><td class="small muted">' + h(l.how) + '</td></tr>'; }).join('');
+    view.innerHTML = '<h2>Prices</h2><div class="notice"><strong>Linked to www.sabreoffice.co.uk.</strong> Every product holds the address of its page on your website. The system reads the price there every morning, and again at the moment a client asks for a quote. Your mark-up (<strong>' + h(c.markupPct) + '%</strong>) is added on top, so changing the mark-up never needs another visit to the website.</div>' +
+      '<div class="actions" style="margin:10px 0 18px"><button class="btn" id="chk">Check prices on the website now</button><button class="btn ghost" id="sim">Demo: pretend the website changed some prices</button></div><div id="pmsg"></div>' +
+      '<div class="card sectionbox" style="overflow-x:auto"><div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><h3 style="margin:0">Products (' + c.products.length + ')</h3><input type="search" id="pf" placeholder="Search products" style="max-width:300px" value="' + h(filter || '') + '"></div>' +
+      '<table class="t"><thead><tr><th>Code</th><th>Product</th><th class="num">Website price (ex VAT)</th><th class="num">Client price (ex VAT)</th><th class="num">Checked</th><th class="num">Flag</th></tr></thead><tbody>' + rows + '</tbody></table>' + (list.length > 200 ? '<p class="small muted">Showing the first 200. Use the search to narrow it down.</p>' : '') + '</div>' +
+      '<div class="card" style="overflow-x:auto"><h3>Price changes found</h3><table class="t"><thead><tr><th>When</th><th>Product</th><th class="num">Was</th><th class="num">Now</th><th>How</th></tr></thead><tbody>' + (log || '<tr><td colspan="5" class="muted">No changes yet. Press "pretend the website changed some prices", then "Check prices on the website now" to see the system put them right.</td></tr>') + '</tbody></table></div>';
+    $('#pf').addEventListener('input', function () { var p = this.selectionStart; drawPrices(this.value); var el = $('#pf'); el.focus(); el.setSelectionRange(p, p); });
+    S.$$('[data-meas]').forEach(function (cb) { cb.addEventListener('change', function () { A('adminToggleProduct', cb.dataset.meas, null, cb.checked).then(function () { S.toast('Saved', 'ok'); }).catch(fail); }); });
+    S.$$('[data-rs]').forEach(function (cb) { cb.addEventListener('change', function () { A('adminToggleProduct', cb.dataset.rs, null, null, cb.checked).then(function () { S.toast('Saved', 'ok'); }).catch(fail); }); });
+    $('#chk').addEventListener('click', function () {
+      var b = this; S.busy(b, true, 'Reading prices from the website…');
+      A('adminRefreshPrices').then(function (r) { S.toast('Checked ' + r.checked + ' products. ' + r.changed + ' changed.' + (r.failed ? ' ' + r.failed + ' could not be read.' : ''), 'ok'); showPrices(); }).catch(function (e) { S.busy(b, false); fail(e); });
+    });
+    $('#sim').addEventListener('click', function () {
+      var b = this; S.busy(b, true, 'Working…');
+      A('adminSimulatePriceChange').then(function (r) { S.toast(r.changed + ' prices changed. Now press "Check prices on the website now".', 'ok'); showPrices(); }).catch(function (e) { S.busy(b, false); fail(e); });
+    });
+  }
+
+  // ---- activity ---------------------------------------------------------------------------------
+  function showActivity(kind) {
+    A('adminActivity', 200).then(function (list) {
+      var f = kind || '';
+      var rows = list.filter(function (a) { return !f || a.kind === f; }).map(function (a) {
+        return '<tr><td class="tiny" style="white-space:nowrap">' + S.dateTime(a.ts) + '</td><td><span class="pill ' + ({ email: 'green', status: 'amber', note: 'grey' }[a.kind] || '') + '">' + h(a.kind) + '</span></td><td>' + h(a.orderId || '-') + '</td><td>' + h(a.who || '') + '</td><td>' + h(a.summary) + '</td></tr>';
+      }).join('');
+      view.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Activity &amp; emails</h2><select id="kf" style="max-width:200px"><option value="">Everything</option><option value="email"' + (f === 'email' ? ' selected' : '') + '>Emails only</option><option value="status"' + (f === 'status' ? ' selected' : '') + '>Stage changes</option><option value="note"' + (f === 'note' ? ' selected' : '') + '>Notes</option></select></div>' +
+        '<p class="muted small">Every email the system sends, and every change, is logged here automatically, so nothing is ever "I think someone emailed them".</p>' +
+        '<div class="card" style="overflow-x:auto"><table class="t"><thead><tr><th>When</th><th>Type</th><th>Order</th><th>Client</th><th>What happened</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" class="muted">Nothing yet.</td></tr>') + '</tbody></table></div>';
+      $('#kf').addEventListener('change', function () { showActivity(this.value); });
+    }).catch(fail);
+  }
+
+  // ---- settings & demo tools ----------------------------------------------------------------------
+  function showSettings() {
+    A('adminGetSettings').then(function (s) {
+      var f = function (id, label, val, type, hint) { return '<div class="field"><label for="' + id + '">' + label + '</label><input type="' + (type || 'text') + '" id="' + id + '" value="' + h(val) + '">' + (hint ? '<div class="tiny muted">' + hint + '</div>' : '') + '</div>'; };
+      view.innerHTML = '<h2>Settings &amp; demo tools</h2><div class="row2" style="align-items:start"><div class="card"><h3>Settings</h3>' +
+        f('s-alert', 'Alert email', s.alert_email, 'email', 'Put your own email address here to receive the alerts Steve would get: new quote, accepted, declined, paid.') +
+        '<div class="row2">' + f('s-mk', 'Mark-up on website prices (%)', s.markup_pct, 'number', 'Applied to the ex-VAT price on sabreoffice.co.uk.') + f('s-vat', 'VAT (%)', s.vat_pct, 'number') + '</div>' +
+        '<div class="row2">' + f('s-valid', 'Quotes stay open for (days)', s.quote_valid_days, 'number') + f('s-from', 'Emails are sent from the name', s.from_name) + '</div>' +
+        '<div class="row2">' + f('s-min', 'Minutes saved per automatic email', s.minutes_per_email, 'number', 'Your own estimate, used for the time-saved figure.') + '<div></div></div>' +
+        '<h3 style="margin-top:14px">Measure-up visits and your calendar</h3>' +
+        f('s-cal', 'Steve\'s calendar address', s.steve_calendar, 'email', 'Steve\'s email address, once he has shared his Google Calendar with the account running this system (&ldquo;Make changes to events&rdquo;). Then pending and confirmed visits appear in HIS calendar. Leave blank to use the system\'s own calendar and invite Steve to each confirmed visit.') +
+        '<div style="margin:-4px 0 12px"><button class="btn small ghost" id="s-calchk" type="button">Check the calendar link</button> <span class="small" id="s-calmsg"></span></div>' +
+        '<div class="row2">' + f('s-vm', 'Visit length (minutes)', s.visit_minutes, 'number') + f('s-vn', 'Earliest a client can ask for (hours from now)', s.visit_notice_hours, 'number') + '</div>' +
+        '<div class="row2">' + f('s-vs', 'Visits start from (hour, 24h)', s.visit_start_hour, 'number') + f('s-ve', 'Visits must end by (hour, 24h)', s.visit_end_hour, 'number') + '</div>' +
+        '<h3 style="margin-top:14px">Monthly offers and restocking</h3>' +
+        '<div class="row2"><div class="field"><label for="s-pe">Monthly offer emails</label><select id="s-pe"><option value="yes"' + (String(s.promo_enabled) !== 'no' ? ' selected' : '') + '>On</option><option value="no"' + (String(s.promo_enabled) === 'no' ? ' selected' : '') + '>Off</option></select></div>' + f('s-pd', 'Sent on day of the month', s.promo_day, 'number') + '</div>' +
+        '<div class="row2">' + f('s-pp', 'Default discount on an automatic offer (%)', s.promo_default_pct, 'number', 'Steve can change any offer before it goes.') + f('s-pv', 'Offer prices stay valid for (days)', s.promo_valid_days, 'number') + '</div>' +
+        '<div class="row2"><div class="field"><label for="s-re">Automatic restock quotes</label><select id="s-re"><option value="yes"' + (String(s.restock_enabled) !== 'no' ? ' selected' : '') + '>On</option><option value="no"' + (String(s.restock_enabled) === 'no' ? ' selected' : '') + '>Off</option></select></div>' + f('s-rm', 'Purchases needed before it predicts', s.restock_min_purchases, 'number', 'How many times a client must have bought a product.') + '</div>' +
+        '<div class="row2">' + f('s-rl', 'Send the quote this many days before they run out', s.restock_lead_days, 'number') + '<div></div></div>' +
+        '<div class="row2">' + f('s-ph', 'Phone shown in emails', s.company_phone) + f('s-em', 'Email shown in emails', s.company_email) + '</div>' +
+        '<div class="field"><label for="s-fu">Automatic reminders and follow-ups</label><select id="s-fu"><option value="yes"' + (String(s.followups_enabled) !== 'no' ? ' selected' : '') + '>On</option><option value="no"' + (String(s.followups_enabled) === 'no' ? ' selected' : '') + '>Paused</option></select></div>' +
+        '<div class="err" id="s-err"></div><button class="btn" id="s-save">Save settings</button></div>' +
+        '<div class="card"><h3>Demo tools</h3><p class="small muted">Emails left to send today: <strong>' + h(s.emailsLeftToday) + '</strong></p>' +
+        '<div class="field"><label for="t-em">Send me a sample of every email</label><div style="display:flex;gap:8px"><input type="email" id="t-em" placeholder="your@email.com" value="' + h(s.alert_email) + '"><button class="btn ghost" id="t-go" style="white-space:nowrap">Send samples</button></div><div class="tiny muted">About 25 emails: every message a client or Steve can receive, marked [SAMPLE].</div></div>' +
+        '<div class="field"><label for="a-days">Run the automatic follow-ups as if time has passed</label><div style="display:flex;gap:8px"><select id="a-days"><option value="0">Right now (as it is)</option><option value="2">2 days later</option><option value="3">3 days later</option><option value="5">5 days later</option><option value="7">7 days later</option><option value="8">8 days later</option><option value="15">15 days later</option></select><button class="btn ghost" id="a-go" style="white-space:nowrap">Run follow-ups</button></div>' +
+        '<div class="tiny muted">Reminders are normally sent by the system each hour. This lets you see what a quote reminder, a payment chaser or a save-the-sale email looks like without waiting.</div></div>' +
+        '<div class="field" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)"><label>Start again</label><button class="btn ghost red" id="reset">Clear all demo orders and clients</button><div class="tiny muted">Keeps products, prices and settings. Use it before showing someone else.</div></div></div></div>';
+      $('#s-calchk').addEventListener('click', function () {
+        var b = this; S.busy(b, true, 'Checking…');
+        A('adminSaveSettings', { steve_calendar: $('#s-cal').value }).then(function () { return A('adminCalendarCheck'); })
+          .then(function (r) { S.busy(b, false); $('#s-calmsg').innerHTML = '<span style="color:' + (r.linked ? 'var(--green)' : 'var(--amber)') + '">' + h(r.message) + '</span>'; })
+          .catch(function (e) { S.busy(b, false); $('#s-calmsg').innerHTML = '<span class="err">' + h(e.message) + '</span>'; });
+      });
+      $('#s-save').addEventListener('click', function () {
+        var b = this; $('#s-err').textContent = ''; S.busy(b, true, 'Saving…');
+        A('adminSaveSettings', { alert_email: $('#s-alert').value, markup_pct: $('#s-mk').value, vat_pct: $('#s-vat').value, quote_valid_days: $('#s-valid').value, from_name: $('#s-from').value, company_phone: $('#s-ph').value, company_email: $('#s-em').value, followups_enabled: $('#s-fu').value, minutes_per_email: $('#s-min').value, promo_enabled: $('#s-pe').value, promo_day: $('#s-pd').value, promo_default_pct: $('#s-pp').value, promo_valid_days: $('#s-pv').value, restock_enabled: $('#s-re').value, restock_min_purchases: $('#s-rm').value, restock_lead_days: $('#s-rl').value,
+          steve_calendar: $('#s-cal').value, visit_minutes: $('#s-vm').value, visit_notice_hours: $('#s-vn').value, visit_start_hour: $('#s-vs').value, visit_end_hour: $('#s-ve').value })
+          .then(function () { S.toast('Settings saved', 'ok'); showSettings(); }).catch(function (e) { S.busy(b, false); $('#s-err').textContent = e.message; });
+      });
+      $('#t-go').addEventListener('click', function () { var b = this; S.busy(b, true, 'Sending…'); A('adminTestEmail', $('#t-em').value).then(function (r) { S.busy(b, false); S.toast(r.sent + ' sample emails sent to ' + r.to, 'ok'); }).catch(function (e) { S.busy(b, false); fail(e); }); });
+      $('#a-go').addEventListener('click', function () { var b = this; S.busy(b, true, 'Running…'); A('adminRunAutomations', $('#a-days').value).then(function (r) { S.busy(b, false); S.toast(r.note, 'ok'); }).catch(function (e) { S.busy(b, false); fail(e); }); });
+      $('#reset').addEventListener('click', function () { if (confirm('Clear every demo order, client and activity entry? This cannot be undone.')) A('adminResetDemo').then(function () { S.toast('Demo data cleared', 'ok'); }).catch(fail); });
+    }).catch(fail);
+  }
+
+  // ---- start --------------------------------------------------------------------------------------
+  go(S.qs('tab') || 'pipeline');
+  var m = /order=([^&]+)/.exec(location.hash), ms = /slot=(\d+)/.exec(location.hash);
+  if (m) setTimeout(function () {
+    openOrderThen(decodeURIComponent(m[1]), function () {
+      if (ms && cur && cur.stage === 'Measure-up requested' && cur.visit.slots[Number(ms[1])]) {
+        var sl = cur.visit.slots[Number(ms[1])];
+        if (confirm('Approve ' + vDay(sl.start) + ' at ' + vTime(sl.start) + ' and email ' + cur.customerFull.name + ' the confirmation?')) approveSlot(Number(ms[1]));
+      }
+    });
+  }, 600);
+})();
+</script>
+</body>
+</html>

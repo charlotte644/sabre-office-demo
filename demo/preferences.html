@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email preferences | Sabre Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="site-header"></div>
+<main class="wrap"><div class="card authbox" id="box"><div class="center"><span class="spinner dark"></span> One moment&hellip;</div></div></main>
+<div id="site-footer"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var S = window.Sabre, h = S.h, $ = S.$;
+  S.layout('account');
+  var c = S.qs('c'), t = S.qs('t'), box = $('#box');
+
+  function draw(p, saved) {
+    box.innerHTML = '<h2>Your email preferences</h2><p class="muted small">' + h(p.name) + ' · ' + h(p.email) + '</p>' + (saved ? '<div class="notice green small">Saved. Thank you.</div>' : '') +
+      '<label style="display:flex;gap:12px;align-items:flex-start;font-size:.95rem;font-weight:500;margin:16px 0;cursor:pointer"><input type="checkbox" id="of" style="width:20px;height:20px;margin-top:3px;accent-color:var(--blue)"' + (p.offers ? ' checked' : '') + '>' +
+      '<span>Monthly offers<br><span class="small muted" style="font-weight:400">One email a month with special prices on products people use most.</span></span></label>' +
+      '<label style="display:flex;gap:12px;align-items:flex-start;font-size:.95rem;font-weight:500;margin:16px 0;cursor:pointer"><input type="checkbox" id="rs" style="width:20px;height:20px;margin-top:3px;accent-color:var(--blue)"' + (p.restock ? ' checked' : '') + '>' +
+      '<span>Restock reminders<br><span class="small muted" style="font-weight:400">A ready-made quote just before you are likely to run out of things you order regularly.</span></span></label>' +
+      '<div class="err" id="err" role="alert"></div><button class="btn block" id="sv">Save my preferences</button>' +
+      '<p class="small center" style="margin-top:14px"><a href="#" id="none">Unsubscribe from both</a></p>' +
+      '<p class="tiny muted center">Order confirmations, quotes you ask for and delivery updates are not affected.</p>';
+    var save = function (offers, restock, btn) {
+      if (btn) S.busy(btn, true, 'Saving…');
+      S.api('savePreferences', c, t, offers, restock).then(function (r) { draw(r, true); }).catch(function (e) { if (btn) S.busy(btn, false); $('#err').textContent = e.message; });
+    };
+    $('#sv').addEventListener('click', function () { save($('#of').checked, $('#rs').checked, this); });
+    $('#none').addEventListener('click', function (e) { e.preventDefault(); save(false, false); });
+  }
+
+  if (!c || !t) box.innerHTML = '<h2>This link looks incomplete</h2><p class="muted">Please use the link at the bottom of your latest email.</p>';
+  else S.api('getPreferences', c, t).then(function (p) { draw(p, false); }).catch(function (e) { box.innerHTML = '<h2>We could not open that page</h2><p class="muted">' + h(e.message) + '</p>'; });
+})();
+</script>
+</body>
+</html>

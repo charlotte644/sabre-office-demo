@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order and get a quote | Sabre Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<section class="hero">
+  <div class="wrap">
+    <h1>Office supplies, quoted in seconds</h1>
+    <p>Choose your products and quantities and get an instant quote, worked out from today's prices. Accept it online, pay securely, and follow your order in your own account.</p>
+    <div class="steps"><span><b>1</b>Pick your products</span><span><b>2</b>Get your quote</span><span><b>3</b>Accept and pay</span></div>
+  </div>
+</section>
+
+<main class="wrap" id="main">
+  <div id="offerstrip" class="notice red hide" style="margin-top:16px"></div>
+  <div id="confirm" class="hide"></div>
+  <div class="shop" id="shop">
+    <section aria-label="Products">
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="Search by name, product code or category (try: paper, desk, toner)" aria-label="Search products">
+        <select id="cat" aria-label="Category"><option value="">All categories</option></select>
+      </div>
+      <div class="chips" id="groups" role="tablist"></div>
+      <div id="loading" class="center muted" style="padding:40px"><span class="spinner dark"></span> Loading products and today's prices&hellip;</div>
+      <div class="grid" id="grid"></div>
+      <p id="nores" class="muted center hide" style="padding:30px">No products match your search. Try a shorter word, or choose "All".</p>
+    </section>
+
+    <aside class="basket card" aria-label="Your quote">
+      <h2>Your quote <span class="small muted" id="count"></span></h2>
+      <div id="blines"><p class="muted small">Nothing here yet. Add products from the list and your quote builds as you go.</p></div>
+      <div class="totals hide" id="totals">
+        <div><span>Subtotal (ex VAT)</span><span id="t-sub"></span></div>
+        <div><span id="t-vatl">VAT</span><span id="t-vat"></span></div>
+        <div class="grand"><span>Total</span><span id="t-tot"></span></div>
+      </div>
+      <div class="livepill" id="livepill">Prices read from sabreoffice.co.uk</div>
+
+      <div class="measure">
+        <label class="chk"><input type="checkbox" id="mchk"><span>I'd like Steve to visit and measure up first<br><span class="small muted" style="font-weight:400">Best for desks, storage and anything that has to fit a space.</span></span></label>
+        <div id="mhint" class="notice amber small hide">You have chosen items that are usually fitted to a space. A measure-up visit before we quote is a good idea.</div>
+        <div id="mfields" class="hide" style="margin-top:12px">
+          <div class="field"><label for="maddr">Address Steve should visit *</label><textarea id="maddr" placeholder="Building, street, town, postcode"></textarea></div>
+          <div class="field"><label>When suits you? Pick up to 3 times *</label>
+            <div class="small muted" style="margin-bottom:6px">These are times Steve is free. He will confirm one, and <strong>nothing is booked until you get his confirmation email</strong>.</div>
+            <div id="vdays" class="chips" style="margin-bottom:8px"></div><div id="vtimes" class="chips" style="margin-bottom:8px"></div>
+            <div id="vpicked" class="small"></div></div>
+          <div class="field"><label for="mnotes">Anything we should know?</label><textarea id="mnotes" placeholder="What needs measuring? Access, parking, who to ask for&hellip;"></textarea></div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:6px">Your details</h3>
+      <div id="signedin" class="notice small hide"></div>
+      <div class="field"><label for="name">Your name *</label><input type="text" id="name" autocomplete="name"></div>
+      <div class="field"><label for="company">Company</label><input type="text" id="company" autocomplete="organization"></div>
+      <div class="row2">
+        <div class="field"><label for="email">Email *</label><input type="email" id="email" autocomplete="email"></div>
+        <div class="field"><label for="phone">Phone</label><input type="tel" id="phone" autocomplete="tel"></div>
+      </div>
+      <div class="field"><label for="addr">Delivery address</label><textarea id="addr" autocomplete="street-address"></textarea></div>
+      <div class="field"><label for="pc">Postcode</label><input type="text" id="pc" autocomplete="postal-code" style="max-width:160px"></div>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:.86rem;cursor:pointer"><input type="checkbox" id="mk" style="width:18px;height:18px;margin-top:2px;accent-color:var(--blue)"><span>Email me a monthly offer and a reminder when I am likely to need a restock. You can unsubscribe at any time.</span></label>
+      <p class="tiny muted">We will email your quote to this address. We only use your details to deal with this enquiry.</p>
+      <div class="err" id="err" role="alert"></div>
+      <button class="btn block" id="go">Get my quote</button>
+      <p class="small center" style="margin-top:12px">Already a customer? <a href="account.html">Log in</a> to re-order and track deliveries.</p>
+    </aside>
+  </div>
+</main>
+
+<div id="site-footer"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var S = window.Sabre, h = S.h, $ = S.$;
+  S.layout('order');
+  var GROUPS = ['Office Supplies', 'Paper & Envelopes', 'Ink & Toner', 'Technology', 'Furniture', 'Catering', 'Facilities', 'Safety & PPE', 'Packaging'];
+  var st = { products: [], byId: {}, basket: S.store.get('sabre_basket_v1') || {}, group: '', cat: '', q: '', vat: 20, updated: '', reorder: false };
+
+  function saveBasket() { S.store.set('sabre_basket_v1', st.basket); }
+
+  // ---- load products ----------------------------------------------------------------------
+  S.api('getCatalogue').then(function (c) {
+    st.products = c.products; st.vat = c.vatPct; st.updated = c.updated;
+    c.products.forEach(function (p) { st.byId[p.id] = p; });
+    Object.keys(st.basket).forEach(function (id) { if (!st.byId[id]) delete st.basket[id]; });
+    $('#loading').classList.add('hide');
+    $('#livepill').textContent = st.updated ? 'Prices read from sabreoffice.co.uk · last checked ' + S.dateTime(st.updated) + ' · re-checked when you get your quote' : 'Prices read from sabreoffice.co.uk';
+    var offers = c.products.filter(function (p) { return p.offer; });
+    if (offers.length) { var strip = $('#offerstrip'); strip.classList.remove('hide'); strip.innerHTML = '<strong>This month\'s offers:</strong> ' + offers.length + ' products have special prices until ' + S.date(offers[0].offerUntil) + '. Look for the red <strong>Offer</strong> label.'; }
+    var add = S.qs('add'); if (add && st.byId[add]) { st.basket[add] = (st.basket[add] || 0) + 1; saveBasket(); history.replaceState(null, '', 'index.html'); S.toast('Added to your quote: ' + st.byId[add].name.slice(0, 50), 'ok'); }
+    drawGroups(); drawCats(); drawGrid(); drawBasket();
+  }).catch(function (e) {
+    $('#loading').innerHTML = '<span style="color:#b92b3a">' + h(e.message) + '</span>';
+  });
+
+  // ---- filters ----------------------------------------------------------------------------
+  function drawGroups() {
+    var present = GROUPS.filter(function (g) { return st.products.some(function (p) { return p.group === g; }); });
+    var html = '<button class="chip ' + (st.group === '' ? 'on' : '') + '" data-g="">All</button>';
+    present.forEach(function (g) { html += '<button class="chip ' + (st.group === g ? 'on' : '') + '" data-g="' + h(g) + '">' + h(g) + '</button>'; });
+    $('#groups').innerHTML = html;
+  }
+  function drawCats() {
+    var cats = {};
+    st.products.forEach(function (p) { if (!st.group || p.group === st.group) cats[p.cat] = true; });
+    var html = '<option value="">All categories</option>';
+    Object.keys(cats).sort().forEach(function (c) { html += '<option value="' + h(c) + '"' + (st.cat === c ? ' selected' : '') + '>' + h(c) + '</option>'; });
+    $('#cat').innerHTML = html;
+  }
+  $('#groups').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    st.group = b.dataset.g; st.cat = ''; drawGroups(); drawCats(); drawGrid();
+  });
+  $('#cat').addEventListener('change', function (e) { st.cat = e.target.value; drawGrid(); });
+  $('#q').addEventListener('input', function (e) { st.q = e.target.value.trim().toLowerCase(); drawGrid(); });
+
+  function visible() {
+    var words = st.q ? st.q.split(/\s+/) : [];
+    return st.products.filter(function (p) {
+      if (st.group && p.group !== st.group) return false;
+      if (st.cat && p.cat !== st.cat) return false;
+      if (!words.length) return true;
+      var hay = (p.name + ' ' + p.code + ' ' + p.cat + ' ' + p.group).toLowerCase();
+      return words.every(function (w) { return hay.indexOf(w) !== -1; });
+    });
+  }
+
+  function drawGrid() {
+    var list = visible(), html = '';
+    list.forEach(function (p) {
+      var inq = st.basket[p.id] ? 'In your quote: ' + st.basket[p.id] : '';
+      html += '<div class="prod" data-id="' + h(p.id) + '">' + (p.offer ? '<span class="badge" style="background:#DC3545;color:#fff">Offer -' + h(p.offer) + '%</span>' : (p.measure ? '<span class="badge">Measure-up advised</span>' : '')) +
+        '<div class="pic"><img src="' + h(p.img) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'"></div>' +
+        '<div class="nm" title="' + h(p.name) + '">' + h(p.name) + '</div><div class="cd">Code ' + h(p.code) + ' &middot; ' + h(p.cat) + '</div>' +
+        '<div class="pr">' + (p.was ? '<s class="muted" style="font-size:.8rem;font-weight:400">' + S.money(p.was) + '</s> ' : '') + S.money(p.price) + ' <small>ex VAT</small></div><div class="inq">' + h(inq) + '</div>' +
+        '<div class="add"><input type="number" min="1" max="9999" value="1" aria-label="Quantity"><button class="btn">Add</button></div></div>';
+    });
+    $('#grid').innerHTML = html;
+    $('#nores').classList.toggle('hide', list.length > 0 || !st.products.length);
+  }
+  $('#grid').addEventListener('click', function (e) {
+    var btn = e.target.closest('.add .btn'); if (!btn) return;
+    var card = btn.closest('.prod'), id = card.dataset.id, q = Math.floor(Number($('input', card).value));
+    if (!(q >= 1)) { $('input', card).value = 1; q = 1; }
+    st.basket[id] = Math.min(9999, (st.basket[id] || 0) + q);
+    saveBasket(); drawBasket();
+    $('.inq', card).textContent = 'In your quote: ' + st.basket[id];
+    $('input', card).value = 1;
+    btn.textContent = 'Added'; setTimeout(function () { btn.textContent = 'Add'; }, 900);
+  });
+
+  // ---- basket -----------------------------------------------------------------------------
+  function calc() {
+    var sub = 0, n = 0, measure = false, lines = [];
+    Object.keys(st.basket).forEach(function (id) {
+      var p = st.byId[id], q = st.basket[id]; if (!p) return;
+      var line = Math.round(p.price * q * 100) / 100; sub += line; n += q; if (p.measure) measure = true;
+      lines.push({ p: p, q: q, line: line });
+    });
+    sub = Math.round(sub * 100) / 100;
+    var vat = Math.round(sub * st.vat) / 100;
+    return { lines: lines, sub: sub, vat: vat, total: Math.round((sub + vat) * 100) / 100, n: n, measure: measure };
+  }
+  function drawBasket() {
+    var c = calc(), html = '';
+    c.lines.forEach(function (l) {
+      html += '<div class="bline" data-id="' + h(l.p.id) + '"><div class="nm">' + h(l.p.name) + '<div class="tiny muted">' + S.money(l.p.price) + ' each</div></div><div class="right"><strong>' + S.money(l.line) + '</strong></div>' +
+        '<div class="qty"><button data-d="-1" aria-label="One fewer">&minus;</button><input type="number" min="1" max="9999" value="' + l.q + '" aria-label="Quantity"><button data-d="1" aria-label="One more">+</button></div>' +
+        '<div class="right"><button class="btn small ghost red" data-rm="1">Remove</button></div></div>';
+    });
+    $('#blines').innerHTML = html || '<p class="muted small">Nothing here yet. Add products from the list and your quote builds as you go.</p>';
+    $('#totals').classList.toggle('hide', !c.lines.length);
+    $('#t-sub').textContent = S.money(c.sub); $('#t-vatl').textContent = 'VAT (' + st.vat + '%)'; $('#t-vat').textContent = S.money(c.vat); $('#t-tot').textContent = S.money(c.total);
+    $('#count').textContent = c.n ? '(' + c.n + ' item' + (c.n === 1 ? '' : 's') + ')' : '';
+    $('#mhint').classList.toggle('hide', !c.measure || $('#mchk').checked);
+    $('#go').textContent = $('#mchk').checked ? 'Request my measure-up visit' : 'Get my quote';
+  }
+  $('#blines').addEventListener('click', function (e) {
+    var line = e.target.closest('.bline'); if (!line) return; var id = line.dataset.id;
+    if (e.target.dataset.rm) { delete st.basket[id]; }
+    else if (e.target.dataset.d) { st.basket[id] = Math.max(1, Math.min(9999, (st.basket[id] || 1) + Number(e.target.dataset.d))); }
+    else return;
+    saveBasket(); drawBasket(); drawGrid();
+  });
+  $('#blines').addEventListener('change', function (e) {
+    var line = e.target.closest('.bline'); if (!line || e.target.type !== 'number') return;
+    var q = Math.floor(Number(e.target.value)); st.basket[line.dataset.id] = q >= 1 ? Math.min(q, 9999) : 1;
+    saveBasket(); drawBasket(); drawGrid();
+  });
+  $('#mchk').addEventListener('change', function () { $('#mfields').classList.toggle('hide', !this.checked); if (this.checked && !$('#maddr').value) $('#maddr').value = $('#addr').value; if (this.checked) loadSlots(); drawBasket(); });
+
+  // ---- visit times (read from Steve's calendar) ---------------------------------------------------
+  var vis = { days: null, day: '', picked: [], loading: false };
+  function loadSlots() {
+    if (vis.days || vis.loading) return;
+    vis.loading = true; $('#vdays').innerHTML = '<span class="small muted"><span class="spinner dark"></span> Checking Steve\'s diary&hellip;</span>';
+    S.api('getVisitSlots').then(function (r) { vis.days = r.days; vis.day = r.days.length ? r.days[0].date : ''; vis.loading = false; drawSlots(); })
+      .catch(function (e) { vis.loading = false; $('#vdays').innerHTML = '<span class="err">' + h(e.message) + '</span>'; });
+  }
+  function slotLabel(s) { var d = (vis.days || []).filter(function (x) { return x.date === s.slice(0, 10); })[0]; return (d ? d.label : s.slice(0, 10)) + ' at ' + s.slice(11, 16); }
+  function drawSlots() {
+    if (!vis.days) return;
+    if (!vis.days.length) { $('#vdays').innerHTML = '<span class="small muted">No times are free in the next two weeks. Please call us on 029 2088 2780.</span>'; return; }
+    $('#vdays').innerHTML = vis.days.map(function (d) { return '<button type="button" class="chip ' + (d.date === vis.day ? 'on' : '') + '" data-d="' + h(d.date) + '">' + h(d.label) + '</button>'; }).join('');
+    var day = vis.days.filter(function (d) { return d.date === vis.day; })[0];
+    $('#vtimes').innerHTML = day ? day.times.map(function (t) { var key = day.date + ' ' + t, on = vis.picked.indexOf(key) !== -1;
+      return '<button type="button" class="chip ' + (on ? 'on' : '') + '" data-t="' + h(key) + '">' + h(t) + '</button>'; }).join('') : '';
+    $('#vpicked').innerHTML = vis.picked.length ? '<strong>Your times:</strong> ' + vis.picked.map(function (k) { return h(slotLabel(k)) + ' <a href="#" data-rm="' + h(k) + '" aria-label="Remove">&times;</a>'; }).join(' &middot; ') : '<span class="muted">No times picked yet.</span>';
+  }
+  $('#vdays').addEventListener('click', function (e) { var b = e.target.closest('[data-d]'); if (!b) return; vis.day = b.dataset.d; drawSlots(); });
+  $('#vtimes').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-t]'); if (!b) return; var k = b.dataset.t, i = vis.picked.indexOf(k);
+    if (i !== -1) vis.picked.splice(i, 1); else if (vis.picked.length >= 3) { S.toast('Three times is plenty. Remove one to pick another.', 'err'); return; } else vis.picked.push(k);
+    drawSlots();
+  });
+  $('#vpicked').addEventListener('click', function (e) { var a = e.target.closest('[data-rm]'); if (!a) return; e.preventDefault(); vis.picked.splice(vis.picked.indexOf(a.dataset.rm), 1); drawSlots(); });
+
+  // ---- signed-in customers: fill in their details ------------------------------------------
+  (function prefill() {
+    var ses = S.session.get(); if (!ses || !ses.customer) return;
+    var c = ses.customer;
+    $('#name').value = c.name || ''; $('#company').value = c.company || ''; $('#email').value = c.email || '';
+    $('#phone').value = c.phone || ''; $('#addr').value = c.address || ''; $('#pc').value = c.postcode || '';
+    var n = $('#signedin'); n.classList.remove('hide');
+    n.innerHTML = 'Ordering as <strong>' + h(c.name) + '</strong>. <a href="#" id="notme">Not you?</a>';
+    $('#notme').addEventListener('click', function (e) { e.preventDefault(); S.session.clear(); location.reload(); });
+  })();
+
+  // ---- submit -----------------------------------------------------------------------------
+  $('#go').addEventListener('click', function () {
+    var err = $('#err'); err.textContent = '';
+    var c = calc(), measure = $('#mchk').checked;
+    if (!c.lines.length && !measure) { err.textContent = 'Please add at least one product to your quote.'; return; }
+    if (!$('#name').value.trim()) { err.textContent = 'Please tell us your name.'; $('#name').focus(); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test($('#email').value.trim())) { err.textContent = 'Please check your email address.'; $('#email').focus(); return; }
+    if (measure && !$('#maddr').value.trim()) { err.textContent = 'Please tell us the address Steve should visit.'; $('#maddr').focus(); return; }
+    if (measure && !vis.picked.length) { err.textContent = 'Please pick at least one time for the visit.'; return; }
+    var payload = {
+      name: $('#name').value.trim(), company: $('#company').value.trim(), email: $('#email').value.trim(), phone: $('#phone').value.trim(),
+      address: $('#addr').value.trim(), postcode: $('#pc').value.trim(), marketing: $('#mk').checked,
+      items: c.lines.map(function (l) { return { id: l.p.id, qty: l.q }; }),
+      measure: { required: measure, address: $('#maddr').value.trim(), slots: vis.picked.slice(), notes: $('#mnotes').value.trim() }
+    };
+    S.busy($('#go'), true, c.lines.length ? 'Checking today\'s prices…' : 'Sending…');
+    S.api('submitOrder', payload).then(function (r) {
+      S.store.del('sabre_basket_v1');
+      if (r.stage === 'Quote sent') { location.href = 'quote.html?o=' + encodeURIComponent(r.orderId) + '&t=' + encodeURIComponent(r.token) + '&new=1'; return; }
+      $('#shop').classList.add('hide');
+      var cf = $('#confirm'); cf.classList.remove('hide');
+      cf.innerHTML = '<div class="doc card center" style="padding:36px"><h2>Thank you, we have your visit request</h2>' +
+        '<p><strong>Nothing is booked yet.</strong> Steve will confirm one of the times you picked, and we will email <strong>' + h(payload.email) + '</strong> as soon as he does.</p>' +
+        '<p class="small muted">' + payload.measure.slots.map(function (k) { return h(slotLabel(k)); }).join(' &middot; ') + '</p>' +
+        '<p class="muted">Reference <strong>' + h(r.orderId) + '</strong></p>' +
+        '<div class="actions" style="justify-content:center"><a class="btn" href="quote.html?o=' + encodeURIComponent(r.orderId) + '&t=' + encodeURIComponent(r.token) + '">View my request</a><a class="btn ghost" href="index.html">Start another quote</a></div></div>';
+      window.scrollTo(0, 0);
+    }).catch(function (e) {
+      S.busy($('#go'), false); err.textContent = e.message;
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your quote | Sabre Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="site-header"></div>
+<main class="wrap"><div class="doc" id="doc"><div class="card center" style="padding:40px"><span class="spinner dark"></span> Loading your quote&hellip;</div></div></main>
+<div id="site-footer"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var S = window.Sabre, h = S.h, $ = S.$;
+  S.layout('order');
+  var o = S.qs('o'), t = S.qs('t'), want = S.qs('do'), q = null;
+  var LOGO = 'https://www.sabreoffice.co.uk/admin/images/sitelogo/22241_SiteLogo.jpg';
+
+  function load() {
+    return S.api('getQuote', o, t).then(function (r) { q = r; draw(); if (want) { var w = want; want = ''; history.replaceState(null, '', location.pathname + '?o=' + encodeURIComponent(o) + '&t=' + encodeURIComponent(t)); handle(w); } })
+      .catch(function (e) { $('#doc').innerHTML = '<div class="card center" style="padding:40px"><h2>We could not open that quote</h2><p class="muted">' + h(e.message) + '</p><a class="btn" href="index.html">Start a new quote</a></div>'; });
+  }
+
+  function lineRows() {
+    return q.lines.map(function (l) {
+      return '<tr><td>' + h(l.name) + '<div class="tiny muted">Code ' + h(l.code) + '</div></td><td class="num">' + l.qty + '</td><td class="num">' + (l.was ? '<s class="tiny muted">' + S.money(l.was) + '</s><br>' : '') + S.money(l.unit) + (l.offer ? '<br><span class="tiny" style="color:var(--red);font-weight:600">Offer -' + h(l.offer) + '%</span>' : '') + '</td><td class="num"><strong>' + S.money(l.line) + '</strong></td></tr>';
+    }).join('');
+  }
+
+  function progress() {
+    var s = q.stage, step, labels;
+    if (q.measure) {
+      step = { 'Measure-up requested': 1, 'Measure-up booked': 2, 'Quote sent': 3, 'Declined - save the sale': 3, 'Closed - lost': 3, 'Accepted - awaiting payment': 4, 'Paid - order confirmed': 5, 'Out for delivery': 5, 'Delivered': 5 }[s] || 1;
+      labels = ['Request received', 'Visit booked', 'Quote sent', 'Accepted', 'Paid'];
+    } else {
+      step = { 'New enquiry': 1, 'Quote sent': 2, 'Declined - save the sale': 2, 'Closed - lost': 2, 'Accepted - awaiting payment': 3, 'Paid - order confirmed': 4, 'Out for delivery': 5, 'Delivered': 5 }[s] || 1;
+      labels = ['Quote requested', 'Quote sent', 'Accepted', 'Paid', s === 'Out for delivery' ? 'On its way' : 'Delivered'];
+    }
+    return '<div class="steps-bar" aria-label="Progress">' + labels.map(function (l, i) { return '<div class="' + (i < step ? 'done' : '') + '">' + h(l) + '</div>'; }).join('') + '</div>';
+  }
+
+  // visit times are shown in UK time whatever the viewer's clock says
+  function vDay(iso) { return new Date(iso).toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+  function vTime(iso) { return new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }); }
+  function vRange(a, b) { return vDay(a) + ', ' + vTime(a) + ' to ' + vTime(b); }
+  function icsFile() {
+    var z = function (d) { return new Date(d).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); };
+    var esc = function (x) { return String(x || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;'); };
+    var txt = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Sabre Office//Measure-up visit//EN', 'BEGIN:VEVENT', 'UID:' + q.orderId + '-visit@sabre-office-demo', 'DTSTAMP:' + z(new Date()),
+      'DTSTART:' + z(q.visit.start), 'DTEND:' + z(q.visit.end), 'SUMMARY:' + esc('Sabre Office measure-up visit'), 'LOCATION:' + esc(q.siteAddress),
+      'DESCRIPTION:' + esc('Steve from Sabre Office is visiting to measure up. Order ' + q.orderId + '.'), 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/calendar' })); a.download = 'Sabre-Office-measure-up-visit.ics';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function banner() {
+    var s = q.stage;
+    if (S.qs('new') && s === 'Quote sent') return '<div class="notice green"><strong>Your quote is ready.</strong> We have also emailed it to ' + h(q.customer.email) + ', so you can come back to it later.</div>';
+    if (s === 'Measure-up requested') return '<div class="notice amber"><strong>We have your visit request. Nothing is booked yet.</strong> Steve will confirm one of the times you picked, and we will email you as soon as he does.' + (q.lines.length ? ' The prices below are a provisional estimate until we have measured.' : '') + '</div>';
+    if (s === 'Measure-up booked') return '<div class="notice green"><strong>Your measure-up visit is confirmed.</strong> ' + h(vRange(q.visit.start, q.visit.end)) + '. We will send you a reminder 24 hours before.' + (q.lines.length ? ' The prices below are a provisional estimate until we have measured.' : '') + '</div>';
+    if (s === 'Accepted - awaiting payment') return '<div class="notice green"><strong>Thank you, quote accepted.</strong> The last step is payment. We have emailed you the payment link and your login details.</div>';
+    if (s === 'Paid - order confirmed') return '<div class="notice green"><strong>Paid and confirmed.</strong> Thank you. We will be in touch about delivery, and you can follow the order in your account.</div>';
+    if (s === 'Out for delivery') return '<div class="notice amber"><strong>Your order is on its way.</strong>' + (q.deliveryNote ? ' ' + h(q.deliveryNote) : '') + '</div>';
+    if (s === 'Delivered') return '<div class="notice green"><strong>Delivered' + (q.deliveredAt ? ' on ' + S.date(q.deliveredAt) : '') + '.</strong> Thank you. If anything is not right, just reply to our email.</div>';
+    if (s === 'Declined - save the sale') return '<div class="notice"><strong>This quote is saved.</strong> You declined it' + (q.declineReason ? ' (' + h(q.declineReason) + ')' : '') + '. Steve may give you a quick ring to see whether there is anything he can do. Changed your mind in the meantime? You can re-open the quote below.</div>';
+    if (s === 'Closed - lost') return '<div class="notice red">This quote has closed. Prices change from time to time, so please start a new quote for today\'s prices.</div>';
+    return '';
+  }
+
+  function visitInfo() {
+    var v = q.visit || {};
+    if (v.status === 'Confirmed' || v.status === 'Completed') return '<br><strong class="small">' + (v.status === 'Completed' ? 'Visited: ' : 'Confirmed: ') + h(vRange(v.start, v.end)) + '</strong>';
+    if (v.status === 'Requested' && v.slots && v.slots.length) return '<br><span class="small muted">Requested (awaiting Steve): ' + v.slots.map(function (x) { return h(vDay(x.start).replace(/ \d{4}$/, '') + ' ' + vTime(x.start)); }).join(' &middot; ') + '</span>';
+    return '';
+  }
+
+  function buttons() {
+    var s = q.stage;
+    if (s === 'Measure-up booked') return '<div class="actions"><button class="btn" id="ics">Add the visit to my calendar</button><a class="btn ghost" href="mailto:sales@sabreoffice.co.uk?subject=Visit%20' + encodeURIComponent(o) + '">Need to change the time?</a></div>';
+    if (s === 'Quote sent') return '<div class="actions"><button class="btn" id="accept">Accept this quote</button><button class="btn ghost red" id="decline">No thanks</button></div><p class="small muted" style="margin-top:12px">Accepting sets up your online account and takes you to payment. Nothing is charged until you pay.</p>';
+    if (s === 'Accepted - awaiting payment') return '<div class="actions"><a class="btn" href="pay.html?o=' + encodeURIComponent(o) + '&t=' + encodeURIComponent(t) + '">Pay ' + S.money(q.total) + ' now</a><a class="btn ghost" href="account.html">Log in to my account</a></div>';
+    if (s === 'Paid - order confirmed' || s === 'Out for delivery') return '<div class="actions"><a class="btn" href="account.html">Track my order</a></div>';
+    if (s === 'Delivered') return '<div class="actions"><a class="btn" href="account.html">Re-order in one click</a></div>';
+    if (s === 'Declined - save the sale') return '<div class="actions"><button class="btn" id="reopen">Re-open my quote</button><a class="btn ghost" href="mailto:sales@sabreoffice.co.uk?subject=Quote%20' + encodeURIComponent(o) + '">Talk to Steve</a></div>';
+    if (s === 'Closed - lost') return '<div class="actions"><a class="btn" href="index.html">Start a new quote</a></div>';
+    return '';
+  }
+
+  function draw() {
+    var hasLines = q.lines.length > 0;
+    var meta = '<div><strong>Quote ' + h(q.orderId) + '</strong><br><span class="muted small">Date: ' + S.date(q.quoteSentAt || q.created) + (q.validUntil ? '<br>Valid until: ' + S.date(q.validUntil) : '') + '</span></div>';
+    $('#doc').innerHTML =
+      '<div class="card"><div class="doc-head"><img src="' + LOGO + '" alt="Sabre Office">' + '<div class="right">' + meta + '<div style="margin-top:6px">' + S.stagePill(q.stage) + '</div></div></div>' +
+      progress() + banner() +
+      '<div class="row2" style="margin:14px 0"><div><div class="tiny muted">PREPARED FOR</div><strong>' + h(q.customer.name) + '</strong>' + (q.customer.company ? '<br>' + h(q.customer.company) : '') + '<br><span class="small muted">' + h(q.customer.email) + '</span></div>' +
+      (q.measure ? '<div><div class="tiny muted">SITE MEASURE-UP</div><span class="small">' + h(q.siteAddress) + '</span>' + visitInfo() + '</div>'
+        : (q.deliveryAddress ? '<div><div class="tiny muted">DELIVERY ADDRESS</div><span class="small">' + h(q.deliveryAddress) + '</span></div>' : '<div></div>')) + '</div>' +
+      (hasLines ? '<table class="t"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead><tbody>' + lineRows() + '</tbody></table>' +
+        '<div class="totals" style="max-width:340px;margin-left:auto"><div><span>Subtotal (ex VAT)</span><span>' + S.money(q.subtotal) + '</span></div><div><span>VAT (' + q.vatPct + '%)</span><span>' + S.money(q.vat) + '</span></div>' +
+        '<div class="grand"><span>' + (q.measure && !q.measureDone ? 'Provisional total' : 'Total') + '</span><span>' + S.money(q.total) + '</span></div></div>' : '<p class="muted">No products have been chosen yet. Steve will add them after the visit.</p>') +
+      buttons() + '</div>';
+    var a = $('#accept'), d = $('#decline'), r = $('#reopen');
+    if (a) a.addEventListener('click', function () { handle('accept'); });
+    if (d) d.addEventListener('click', function () { handle('decline'); });
+    if (r) r.addEventListener('click', function () { handle('reopen'); });
+    var ic = $('#ics'); if (ic) ic.addEventListener('click', icsFile);
+  }
+
+  function handle(action) {
+    if (action === 'accept' && q.stage === 'Quote sent') {
+      var m = S.modal('<h2>Accept this quote?</h2><p>You are accepting quote <strong>' + h(q.orderId) + '</strong> for <strong>' + S.money(q.total) + '</strong> inc VAT.</p>' +
+        '<p class="small muted">We will set up your online account, email you the login details, and take you to payment.</p><div class="err" id="merr"></div>' +
+        '<div class="actions"><button class="btn" id="yes">Yes, accept quote</button><button class="btn ghost" id="no">Cancel</button></div>');
+      $('#no', m).addEventListener('click', m.close);
+      $('#yes', m).addEventListener('click', function () {
+        var b = this; S.busy(b, true, 'Accepting…');
+        S.api('acceptQuote', o, t).then(function () { m.close(); S.toast('Quote accepted. Check your email for your login and payment link.', 'ok'); return load(); })
+          .catch(function (e) { S.busy(b, false); $('#merr', m).textContent = e.message; });
+      });
+    } else if (action === 'decline' && q.stage === 'Quote sent') {
+      var m2 = S.modal('<h2>No problem. Before you go&hellip;</h2><p class="small muted">Could you tell us why? Steve may give you a quick ring to see whether there is anything he can do.</p>' +
+        ['The price is higher than I wanted', 'I found it elsewhere', 'I do not need it right now', 'I need different products or quantities', 'Something else'].map(function (r, i) {
+          return '<label style="display:flex;gap:8px;align-items:center;font-size:.92rem;font-weight:400;margin:6px 0"><input type="radio" name="why" value="' + h(r) + '"' + (i === 0 ? ' checked' : '') + '> ' + h(r) + '</label>'; }).join('') +
+        '<div class="field" style="margin-top:10px"><label for="cm">Anything to add? (optional)</label><textarea id="cm"></textarea></div><div class="err" id="merr"></div>' +
+        '<div class="actions"><button class="btn red" id="yes">Decline quote</button><button class="btn ghost" id="no">Back to quote</button></div>');
+      $('#no', m2).addEventListener('click', m2.close);
+      $('#yes', m2).addEventListener('click', function () {
+        var b = this, why = ($('input[name=why]:checked', m2) || {}).value || '';
+        S.busy(b, true, 'Saving…');
+        S.api('declineQuote', o, t, why, $('#cm', m2).value).then(function () { m2.close(); S.toast('Thanks for letting us know. Your quote is saved if you change your mind.'); return load(); })
+          .catch(function (e) { S.busy(b, false); $('#merr', m2).textContent = e.message; });
+      });
+    } else if (action === 'reopen' && (q.stage === 'Declined - save the sale' || q.stage === 'Closed - lost')) {
+      S.api('reopenQuote', o, t).then(function () { S.toast('Welcome back. Your quote is open again.', 'ok'); return load(); }).catch(function (e) { S.toast(e.message, 'err'); });
+    }
+  }
+
+  if (!o || !t) { $('#doc').innerHTML = '<div class="card center" style="padding:40px"><h2>This quote link looks incomplete</h2><p class="muted">Please use the link in your email.</p><a class="btn" href="index.html">Start a new quote</a></div>'; }
+  else load();
+})();
+</script>
+</body>
+</html>
